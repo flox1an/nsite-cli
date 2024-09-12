@@ -4,7 +4,7 @@ import { FileEntry, FileList } from "./types.js";
 
 async function fetchPublicFileEvents(ndk: NDK, pubKey: string): Promise<FileList> {
   return new Promise((resolve, reject) => {
-    const sub = ndk.subscribe({ kinds: [NSITE_KIND], authors: [pubKey] }, {closeOnEose: true});
+    const sub = ndk.subscribe({ kinds: [NSITE_KIND], authors: [pubKey] }, { closeOnEose: true });
     const files: FileList = [];
     sub.on("event", (e) => {
       const file = e.tagValue("d")?.replace(/^\//, "");

@@ -7,7 +7,7 @@ const NOSTR_RELAYS = process.env.NOSTR_RELAYS?.split(",") ?? [
 ];
 const BLOSSOM_SERVERS = process.env.BLOSSOM_SERVERS?.split(",") ?? ["https://media-server.slidestr.net"];
 
-const NOSTR_PRIVATE_KEY = process.env.NOSTR_PRIVATE_KEY || '';
+const NOSTR_PRIVATE_KEY = process.env.NOSTR_PRIVATE_KEY || "";
 
 if (NOSTR_RELAYS.length === 0) throw new Error("Requires at least one relay in NOSTR_RELAYS");
 
