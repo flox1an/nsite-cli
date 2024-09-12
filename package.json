@@ -1,0 +1,31 @@
+{
+  "name": "nsite-cli",
+  "version": "1.0.0",
+  "description": "",
+  "main": "cli.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc",
+    "format": "prettier -w src/**.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@nostr-dev-kit/ndk": "^2.10.0",
+    "axios": "^1.7.7",
+    "blossom-client-sdk": "^1.1.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "websocket-polyfill": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.12",
+    "@types/node": "^22.5.4",
+    "@types/ws": "^8.5.12",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.2"
+  }
+}
