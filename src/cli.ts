@@ -6,14 +6,19 @@ import ndk from "./ndk.js";
 import { listRemoteFiles as findRemoteFiles } from "./nostr.js";
 import { compareFiles as compareFileLists, getAllFiles as findAllLocalFiles } from "./files.js";
 import { processUploads } from "./upload.js";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner, NDKUser } from "@nostr-dev-kit/ndk";
 import { NOSTR_PRIVATE_KEY } from "./env.js";
+import { nip19 } from "nostr-tools";
 
-const signer = new NDKPrivateKeySigner(NOSTR_PRIVATE_KEY);
-signer.blockUntilReady();
-const user = await signer.user();
-console.log(`npub: ${user.npub}`);
-ndk.signer = signer;
+let user: NDKUser;
+
+if (NOSTR_PRIVATE_KEY) {
+  const signer = new NDKPrivateKeySigner(NOSTR_PRIVATE_KEY);
+  signer.blockUntilReady();
+  user = await signer.user();
+  console.log(`npub: ${user.npub}`);
+  ndk.signer = signer;
+}
 
 const program = new Command();
 
@@ -44,7 +49,7 @@ program
       }
 
       //console.log(onlineFiles.map(f => `${f.x}\t${f.changedAt}\t${f.file}`).join('\n'));
-      process.exit(0);
+      //process.exit(0);
     } catch (error) {
       console.error("Failed to fetch online files:", error);
     }
@@ -53,11 +58,12 @@ program
 // Command: list all files available online
 program
   .command("ls")
+  .argument("[npub]", "The public key (npub) of web content to list.")
   .description("List all files available online")
-  .option("-u, --url <serverUrl>", "Server URL to list files from")
-  .action(async (cmdObj) => {
-    const { url } = cmdObj;
-    const onlineFiles = await findRemoteFiles(ndk, user.pubkey);
+  .action(async (npub?: string) => {
+    const optionalPubKey = npub && (nip19.decode(npub).data as string);
+    console.log('Listing web content for ' + (npub || user.npub))
+    const onlineFiles = await findRemoteFiles(ndk, optionalPubKey || user.pubkey);
     console.log(onlineFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
 
     process.exit(0);
