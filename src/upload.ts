@@ -7,7 +7,7 @@ import fs from "fs";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { publishNSiteEvent } from "./nostr.js";
 
-export async function processUploads(filesToUpload: FileList) {
+export async function processUploads(filesToUpload: FileList, blossomServers: string[]) {
   const pubkey = ndk.activeUser?.pubkey;
 
   if (!pubkey) {
@@ -17,17 +17,15 @@ export async function processUploads(filesToUpload: FileList) {
   for await (const f of filesToUpload) {
     console.log("Publishing ", f.localPath, f.remotePath, f.sha256);
     const buffer = fs.readFileSync(f.localPath);
-    const upload = multiServerUpload(BLOSSOM_SERVERS, buffer, signEventTemplate);
-
+    const uploads = multiServerUpload(blossomServers, buffer, signEventTemplate);
+    
     let published = false;
-    for await (let { blob } of upload) {
+    for await (const { blob, progress, server } of uploads) {
       if (!published) {
-        publishNSiteEvent(ndk, pubkey, f.remotePath, f.sha256);
+        await publishNSiteEvent(ndk, pubkey, f.remotePath, f.sha256);
       }
     }
   };
 
-  // TODO this fire too early, somewhere an await is missing.
   console.log("processUpload() ended.");
-
 }
