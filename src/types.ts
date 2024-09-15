@@ -1,5 +1,7 @@
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+
 export type FileEntry = {
-  id?: string;
+  event?: NDKEvent;
   localPath: string;
   remotePath: string;
   sha256: string;

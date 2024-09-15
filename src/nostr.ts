@@ -11,7 +11,7 @@ async function fetchPublicFileEvents(ndk: NDK, pubKey: string): Promise<FileList
     const file = e.tagValue("d")?.replace(/^\//, "");
     const x = e.tagValue("x") || e.tagValue("sha256");
     if (file && x) {
-      files.push({ id: e.id, localPath: file, remotePath: file, sha256: x, changedAt: e.created_at });
+      files.push({ event: e, localPath: file, remotePath: file, sha256: x, changedAt: e.created_at });
     }
   });
 

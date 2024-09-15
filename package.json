@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@noble/hashes": "^1.5.0",
     "@nostr-dev-kit/ndk": "^2.10.0",
     "axios": "^1.7.7",
     "blossom-client-sdk": "^1.1.0",
