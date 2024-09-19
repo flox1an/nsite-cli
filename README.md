@@ -8,11 +8,11 @@ This command line tool allows you to publish a static website on NOSTR in a anon
 ## Usage
 There are two ways to use this tool.
 
-1. When you run `nsite-cli` without any subcommand, it will start an interactive dialog to set up a new project. Here you can also create a new private key (nsec) for signing, add custom relays and blossom servers.
+1. When you run `npx nsite-cli` without any subcommand, it will start an interactive dialog to set up a new project. Here you can also create a new private key (nsec) for signing, add custom relays and blossom servers. All settings will be saved in a `.nsite/project.json` file in the current working directory.
 
 2. You can specify all settings on the command line or environment variables and use the `upload` command to upload a website.
     ```
-    nsite-cli upload \
+    npx nsite-cli upload \
     --relays 'wss://nos.lol,wss://relay.primal.net,wss://relay.nostr.band,wss://relay.damus.io' \
     --servers 'https://cdn.satellite.earth,https://files.v0l.io' \
     --privatekey <some secret nsec> \

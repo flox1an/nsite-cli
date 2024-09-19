@@ -1,6 +1,7 @@
 {
   "name": "nsite-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
+  "author": "florian",
   "description": "nsite CLI - publish your site to NOSTR and blossom servers",
   "main": "dist/cli.js",
   "type": "module",
@@ -9,9 +10,8 @@
     "build": "tsc && chmod +x dist/cli.js",
     "format": "prettier -w src/**.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["nostr", "blossom", "website", "publish"],
+  "license": "MIT",
   "dependencies": {
     "@noble/hashes": "^1.5.0",
     "@nostr-dev-kit/ndk": "^2.10.0",
