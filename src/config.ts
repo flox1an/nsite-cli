@@ -1,5 +1,8 @@
+import { debug } from "debug";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
+
+const log = debug("nsite:config");
 
 type ProjectData = { privateKey?: string; relays: string[]; servers: string[] };
 
@@ -15,7 +18,7 @@ export function writeProjectFile(projectData: ProjectData) {
     }
 
     writeFileSync(projectPath, JSON.stringify(projectData, null, 2));
-    console.log(`Project configuration saved to ${path.relative(process.cwd(), projectPath)}`);
+    log(`Project configuration saved to ${path.relative(process.cwd(), projectPath)}`);
   } catch (error) {
     console.error(`Failed to save project configuration: ${(error as Error).message}`);
   }
@@ -26,7 +29,7 @@ export function readProjectFile(): ProjectData | null {
 
   try {
     if (!existsSync(projectPath)) {
-      console.log(`Project file not found at ${path.relative(process.cwd(), projectPath)}`);
+      log(`Project file not found at ${path.relative(process.cwd(), projectPath)}`);
       return null;
     }
 

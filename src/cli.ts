@@ -22,11 +22,16 @@ import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { readProjectFile, writeProjectFile } from "./config.js";
 import { createInterface } from "readline/promises";
 import { bytesToHex } from "@noble/hashes/utils";
+import debug from "debug";
+
+const log = debug("nsite");
+const logSign = debug("nsite:sign");
+const error = debug("nsite:error");
 
 let ndk: NDK | undefined = undefined;
 
 export const signEventTemplate = async function signEventTemplate(template: EventTemplate): Promise<SignedEvent> {
-  console.log("signEventTemplate called");
+  logSign("signEventTemplate called", template);
   const e = new NDKEvent(ndk);
   e.kind = template.kind;
   e.content = template.content;
@@ -42,16 +47,19 @@ async function initNdk(privateKey: string, relays: string[] = []): Promise<NDKUs
     explicitRelayUrls: [...uniqueRelays.values()],
   });
 
-  await ndk.connect();
   const signer = new NDKPrivateKeySigner(privateKey);
   signer.blockUntilReady();
   const user = await signer.user();
   // console.log(`Using npub: ${user.npub}`);
   ndk.signer = signer;
+  await ndk.connect();
+
   return user;
 }
 
-const program = new Command();
+const program = new Command("nsite-cli");
+
+// TODO add rate limiting for certain relays
 
 // Command: upload files
 program
@@ -93,7 +101,7 @@ program
         }
 
         if (publicBlossomServers.length < blossomServers.length) {
-          console.log("Publishing blossom server list...");
+          log("Publishing blossom server list...");
           await publishBlossomServerList(ndk, user.pubkey, blossomServers);
         }
 
@@ -104,7 +112,7 @@ program
         const localFiles = await findAllLocalFiles(fileOrFolder);
         console.log(`${localFiles.length} files found locally in ${fileOrFolder}`);
         if (optVerbose) {
-          console.log(localFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
+          log(localFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
         }
 
         const onlineFiles = await findRemoteFiles(ndk, user.pubkey);
@@ -140,7 +148,7 @@ program
                   // TODO how can we make sure we are not deleting blobs that are
                   // used otherwise!?
                   await BlossomClient.deleteBlob(s, file.sha256, deleteAuth);
-                  console.log(`Deleted blob ${file.sha256} from server ${s}.`);
+                  log(`Deleted blob ${file.sha256} from server ${s}.`);
                 } catch (e) {
                   console.error(`Error deleting blob ${file.sha256} from server ${s}:`, e);
                 }
@@ -152,7 +160,7 @@ program
 
         process.exit(0);
       } catch (error) {
-        console.error("Failed to fetch online files:", error);
+        log("Failed to fetch online files:", error);
       }
     },
   );
@@ -170,7 +178,7 @@ program
     if (!ndk) return; // TODO handle error
 
     const optionalPubKey = npub && (nip19.decode(npub).data as string);
-    console.log("Listing web content for " + (npub || user.npub));
+    log("Listing web content for " + (npub || user.npub));
     const onlineFiles = await findRemoteFiles(ndk, optionalPubKey || user.pubkey);
     console.log(onlineFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
 
@@ -195,19 +203,19 @@ async function onboarding() {
       privateKey = existingKey.trim();
     }
 
-    console.log("Using provided private key.");
+    log("Using provided private key.");
   } else {
     const signer = NDKPrivateKeySigner.generate();
     privateKey = signer.privateKey!;
-    console.log("Generated new private key.");
+    log("Generated new private key.");
   }
 
   try {
     const signer = new NDKPrivateKeySigner(privateKey);
     const user = await signer.user();
-    console.log("Using npub: " + user.npub);
+    log("Using npub: " + user.npub);
   } catch (e) {
-    console.error("Invalid private key!");
+    log("Invalid private key!");
     process.exit(1);
   }
 
@@ -255,6 +263,7 @@ program.action(async (cmdObj) => {
     console.log(
       `Project is set up with private key, ${projectData.relays.length} relays and ${projectData.servers.length} blossom servers.`,
     );
+  program.help();
 });
 
 program.parse(process.argv);

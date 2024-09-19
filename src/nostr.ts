@@ -1,7 +1,11 @@
 import NDK, { NDKEvent } from "@nostr-dev-kit/ndk";
-import { NSITE_KIND } from "./const.js";
 import { FileEntry, FileList } from "./types.js";
 import { USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
+import debug from "debug";
+
+const log = debug("nsite:nostr");
+
+export const NSITE_KIND = 34128 as number;
 
 async function fetchPublicFileEvents(ndk: NDK, pubKey: string): Promise<FileList> {
   const events = await ndk.fetchEvents({ kinds: [NSITE_KIND], authors: [pubKey] }, { closeOnEose: true });
@@ -40,7 +44,7 @@ export async function publishNSiteEvent(ndk: NDK, pubkey: string, path: string, 
     pubkey,
     kind: NSITE_KIND,
     content: "",
-    created_at: Math.round(Date.now() / 1000),
+    created_at: Math.round(Date.now() / 1000),  // TODO should we use file mtime here?
     tags: [
       ["d", path],
       ["x", sha256],
@@ -51,7 +55,7 @@ export async function publishNSiteEvent(ndk: NDK, pubkey: string, path: string, 
   await e.sign();
   await e.publish();
 
-  console.log("Published", path, sha256, e.sig, e.id);
+  log("Published", path, sha256);
 }
 
 export async function publishBlossomServerList(ndk: NDK, pubkey: string, servers: string[]) {
@@ -66,5 +70,5 @@ export async function publishBlossomServerList(ndk: NDK, pubkey: string, servers
   await e.sign();
   await e.publish();
 
-  console.log("Published blossom server list.", e.id);
+  log("Published blossom server list.", e.id);
 }

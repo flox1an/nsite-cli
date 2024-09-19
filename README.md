@@ -24,6 +24,11 @@ nsite-cli generate
 ```
 to create a newly generated private key.
 
+To enable debug logging, set the `DEBUG` environment variable to `nsite*`
+```
+export DEBUG=nsite*
+```
+
 
 ## Build
 ```

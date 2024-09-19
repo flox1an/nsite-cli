@@ -1,10 +1,11 @@
 import { EventTemplate, multiServerUpload, SignedEvent } from "blossom-client-sdk";
 import { FileList } from "./types.js";
-import { BLOSSOM_SERVERS } from "./env.js";
-import { NSITE_KIND } from "./const.js";
 import fs from "fs";
-import NDK, { NDKEvent } from "@nostr-dev-kit/ndk";
+import NDK from "@nostr-dev-kit/ndk";
 import { publishNSiteEvent } from "./nostr.js";
+import debug from "debug";
+
+const log = debug("nsite:upload");
 
 export async function processUploads(
   ndk: NDK,
@@ -19,17 +20,18 @@ export async function processUploads(
   }
 
   for await (const f of filesToUpload) {
-    console.log("Publishing ", f.localPath, f.remotePath, f.sha256);
+    log("Publishing ", f.localPath, f.remotePath, f.sha256);
     const buffer = fs.readFileSync(f.localPath);
     const uploads = multiServerUpload(blossomServers, buffer, signEventTemplate);
 
     let published = false;
     for await (const { blob, progress, server } of uploads) {
+      log("Uploaded", f.remotePath, `${server}/${blob}`);
       if (!published) {
         await publishNSiteEvent(ndk, pubkey, f.remotePath, f.sha256);
       }
     }
   }
 
-  console.log("processUpload() ended.");
+  log("processUpload() ended.");
 }
