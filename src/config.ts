@@ -1,4 +1,4 @@
-import { debug } from "debug";
+import debug from "debug";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
 
