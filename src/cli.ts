@@ -43,6 +43,7 @@ export const signEventTemplate = async function signEventTemplate(template: Even
 
 async function initNdk(privateKey: string, relays: string[] = []): Promise<NDKUser> {
   const uniqueRelays = new Set([...relays, ...NOSTR_RELAYS]);
+  log("Using relays: ", [...uniqueRelays.values()].join(", "));
   ndk = new NDK({
     explicitRelayUrls: [...uniqueRelays.values()],
   });
@@ -65,23 +66,33 @@ const program = new Command("nsite-cli");
 program
   .command("upload")
   .description("Upload files from a directory")
-  .argument("<file-or-folder>", "The file or folder that should be published.")
+  .argument("<folder>", "The folder that should be published.") // TODO add support for single files
   .option("-f, --force", "Force publishing even if no changes were detected.", false)
+  .option("-s, --servers <servers>", "The blossom servers to use (comma separated).", undefined)
+  .option("-r, --relays <relays>", "The NOSTR relays to use (comma separated).", undefined)
+  .option("-k, --privatekey <nsec>", "The private key (nsec/hex) to use for signing.", undefined)
   .option("-p, --purge", "Delete online file events that are not used anymore.", false)
   .option("-v, --verbose", "Verbose output, i.e. print lists of files uploaded.")
   .action(
     async (
       fileOrFolder: string,
-      { force: optForce, verbose: optVerbose, purge: optPurge }: { force: boolean; verbose: boolean; purge: boolean },
+      options: { force: boolean; verbose: boolean; purge: boolean; servers?: string; relays?: string; privatekey?: string },
     ) => {
+      log("upload called", options);
       const projectData = readProjectFile();
-      if (!projectData?.privateKey) return; // TODO handle generate
-      const user = await initNdk(projectData?.privateKey, projectData?.relays);
+
+      const privateKey = options.privatekey || NOSTR_PRIVATE_KEY || projectData?.privateKey;
+      if (!privateKey) {
+        console.error("No private key found. Please set up a new project or specify a private key with --privatekey.");
+        process.exit(1);
+      }
+      const user = await initNdk(privateKey, [...(projectData?.relays || []), ...(options.relays?.split(",") || [])]);
 
       if (!ndk) return;
 
       const pool = ndk.outboxPool || ndk.pool;
       console.log("Using relays: ", [...pool.relays.values()].map((r) => r.url).join(", "));
+      // TODO publish relay list kind 10002
 
       try {
         const blossomServerEvent = await ndk.fetchEvent([
@@ -93,8 +104,8 @@ program
 
         const blossomServers = [...publicBlossomServers];
 
-        // merge with servers from config/environment
-        for (const bs of [...BLOSSOM_SERVERS, ...projectData.servers]) {
+        // merge with servers from config/environment/cmd line
+        for (const bs of [...BLOSSOM_SERVERS, ...(projectData?.servers || []), ...(options.servers?.split(",") || [])]) {
           if (!blossomServers.find((i) => areServersEqual(i, bs))) {
             blossomServers.push(bs);
           }
@@ -111,13 +122,13 @@ program
 
         const localFiles = await findAllLocalFiles(fileOrFolder);
         console.log(`${localFiles.length} files found locally in ${fileOrFolder}`);
-        if (optVerbose) {
+        if (options.verbose) {
           log(localFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
         }
 
         const onlineFiles = await findRemoteFiles(ndk, user.pubkey);
         console.log(`${onlineFiles.length} files available online.`);
-        if (optVerbose) {
+        if (options.verbose) {
           console.log(onlineFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
         }
 
@@ -126,7 +137,7 @@ program
           `${toUpload.length} new files to upload, ${existing.length} files unchanged, ${toDelete.length} files to delete online.`,
         );
 
-        if (optForce) {
+        if (options.force) {
           // If force option is selected, add all existing files to be uploaded again
           toUpload.push(...existing);
         }
@@ -135,11 +146,11 @@ program
           await processUploads(ndk, toUpload, blossomServers, signEventTemplate);
         }
 
-        if (optVerbose) {
+        if (options.verbose) {
           console.log(toUpload.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
         }
 
-        if (optPurge) {
+        if (options.purge) {
           for await (const file of toDelete) {
             if (file.event) {
               const deleteAuth = await BlossomClient.getDeleteAuth(file.sha256, signEventTemplate);
@@ -169,10 +180,12 @@ program
 program
   .command("ls")
   .argument("[npub]", "The public key (npub) of web content to list.")
+  .option("-r, --relays <relays>", "The NOSTR relays to use (comma separated).", undefined)
   .description("List all files available online")
   .action(async (npub?: string) => {
     const projectData = await setupProject();
     if (!projectData.privateKey) return; // TODO handle error
+    // TODO allow use without a private key (npub only)
 
     const user = await initNdk(projectData.privateKey, projectData.relays);
     if (!ndk) return; // TODO handle error
