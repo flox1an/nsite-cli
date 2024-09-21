@@ -3,18 +3,21 @@ import crypto from "crypto";
 import path from "path";
 import { FileEntry } from "./types.js";
 
-export async function getAllFiles(
+export async function getLocalFiles(
   dirPath: string,
   arrayOfFiles: FileEntry[] = [],
   basePath: string = dirPath,
 ): Promise<FileEntry[]> {
+  if (!fs.existsSync(dirPath)) {
+    return [];
+  }
   const files = await fs.promises.readdir(dirPath);
 
   for (const file of files) {
     const filePath = path.join(dirPath, file);
     const stats = await fs.promises.stat(filePath);
     if (stats.isDirectory()) {
-      arrayOfFiles = await getAllFiles(filePath, arrayOfFiles, basePath);
+      arrayOfFiles = await getLocalFiles(filePath, arrayOfFiles, basePath);
     } else {
       const fileBuffer = await fs.promises.readFile(filePath);
       const x = crypto.createHash("sha256").update(fileBuffer).digest("hex");
@@ -32,19 +35,19 @@ export async function getAllFiles(
 }
 
 export async function compareFiles(
-  localFiles: FileEntry[],
-  remoteFiles: FileEntry[],
+  sourceFiles: FileEntry[],
+  targetFiles: FileEntry[],
 ): Promise<{
-  toUpload: FileEntry[];
+  toTransfer: FileEntry[];
   existing: FileEntry[];
   toDelete: FileEntry[];
 }> {
-  const toUpload: FileEntry[] = [];
+  const toTransfer: FileEntry[] = [];
   const existing: FileEntry[] = [];
   const toDelete: FileEntry[] = [];
 
   // Create a map of remote files for faster lookup
-  const remoteFileMap: Record<string, FileEntry> = remoteFiles.reduce(
+  const remoteFileMap: Record<string, FileEntry> = targetFiles.reduce(
     (map, file) => {
       map[file.remotePath] = file;
       return map;
@@ -53,12 +56,12 @@ export async function compareFiles(
   );
 
   // Compare local files with remote files
-  for (const localFile of localFiles) {
+  for (const localFile of sourceFiles) {
     const remoteFile = remoteFileMap[localFile.remotePath];
     if (!remoteFile) {
-      toUpload.push(localFile);
+      toTransfer.push(localFile);
     } else if (localFile.sha256 !== remoteFile.sha256) {
-      toUpload.push(localFile);
+      toTransfer.push(localFile);
     } else {
       existing.push(localFile);
     }
@@ -69,5 +72,5 @@ export async function compareFiles(
   // Any remaining files in the remoteFileMap should be deleted
   toDelete.push(...Object.values(remoteFileMap));
 
-  return { toUpload, existing, toDelete };
+  return { toTransfer, existing, toDelete };
 }

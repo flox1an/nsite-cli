@@ -1,4 +1,4 @@
-import NDK, { NDKEvent } from "@nostr-dev-kit/ndk";
+import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { FileEntry, FileList } from "./types.js";
 import { USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
 import debug from "debug";
@@ -44,7 +44,7 @@ export async function publishNSiteEvent(ndk: NDK, pubkey: string, path: string, 
     pubkey,
     kind: NSITE_KIND,
     content: "",
-    created_at: Math.round(Date.now() / 1000),  // TODO should we use file mtime here?
+    created_at: Math.round(Date.now() / 1000), // TODO should we use file mtime here?
     tags: [
       ["d", path],
       ["x", sha256],

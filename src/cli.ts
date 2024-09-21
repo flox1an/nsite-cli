@@ -3,26 +3,20 @@ import { WebSocket } from "ws";
 global.WebSocket = global.WebSocket || WebSocket;
 
 import { Command } from "commander";
-import { listRemoteFiles as findRemoteFiles, publishBlossomServerList } from "./nostr.js";
-import { compareFiles as compareFileLists, getAllFiles as findAllLocalFiles } from "./files.js";
+import { listRemoteFiles as findRemoteFiles } from "./nostr.js";
+import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "./files.js";
 import { processUploads } from "./upload.js";
-import NDK, { NDKEvent, NDKPrivateKeySigner, NDKUser } from "@nostr-dev-kit/ndk";
-import { BLOSSOM_SERVERS, NOSTR_PRIVATE_KEY, NOSTR_RELAYS } from "./env.js";
+import NDK, { NDKEvent, NDKNip46Backend, NDKNip46Signer, NDKPrivateKeySigner, NDKUser } from "@nostr-dev-kit/ndk";
+import { NOSTR_PRIVATE_KEY, NOSTR_RELAYS } from "./env.js";
 import { nip19 } from "nostr-tools";
-import {
-  areServersEqual,
-  BlossomClient,
-  EventTemplate,
-  getServersFromServerListEvent,
-  SignedEvent,
-  USER_BLOSSOM_SERVER_LIST_KIND,
-} from "blossom-client-sdk";
+import { BlossomClient, EventTemplate, SignedEvent } from "blossom-client-sdk";
 import path from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { readProjectFile, writeProjectFile } from "./config.js";
-import { createInterface } from "readline/promises";
-import { bytesToHex } from "@noble/hashes/utils";
 import debug from "debug";
+import { findBlossomServers } from "./blossom.js";
+import { setupProject } from "./setup-project.js";
+import { FileList } from "./types.js";
 
 const log = debug("nsite");
 const logSign = debug("nsite:sign");
@@ -42,20 +36,43 @@ export const signEventTemplate = async function signEventTemplate(template: Even
 };
 
 async function initNdk(privateKey: string, relays: string[] = []): Promise<NDKUser> {
-  const uniqueRelays = new Set([...relays, ...NOSTR_RELAYS]);
-  log("Using relays: ", [...uniqueRelays.values()].join(", "));
+  let uniqueRelays = [...new Set([...relays, ...NOSTR_RELAYS]).values()];
+  if (uniqueRelays.length == 0) {
+    log("No relays found. Using fallback relays.");
+    uniqueRelays = ["wss://nos.lol", "wss://relay.primal.net", "wss://relay.nostr.band", "wss://relay.damus.io"];
+  }
+
+  log("Using relays: ", uniqueRelays.join(", "));
   ndk = new NDK({
-    explicitRelayUrls: [...uniqueRelays.values()],
+    explicitRelayUrls: uniqueRelays,
   });
 
-  const signer = new NDKPrivateKeySigner(privateKey);
-  signer.blockUntilReady();
-  const user = await signer.user();
-  // console.log(`Using npub: ${user.npub}`);
-  ndk.signer = signer;
+  let user: NDKUser;
+  if (privateKey.startsWith("npub1")) {
+    // log in with npub
+    const pubkey = nip19.decode(privateKey).data as string;
+    user = new NDKUser({ pubkey });
+  } else if (privateKey.startsWith("bunker://")) {
+    // TODO implement NIP46
+    // https://github.com/nostr-dev-kit/ndk/blob/master/ndk/src/signers/nip46/index.ts#L21
+    throw new Error("NIP46 not implemented");
+  } else {
+    // log in with nsec or hex key
+    const signer = new NDKPrivateKeySigner(privateKey);
+    signer.blockUntilReady();
+    user = await signer.user();
+    // console.log(`Using npub: ${user.npub}`);
+    ndk.signer = signer;
+  }
   await ndk.connect();
 
   return user;
+}
+
+function logFiles(files: FileList, options: { verbose: boolean }) {
+  if (options.verbose) {
+    console.log(files.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
+  }
 }
 
 const program = new Command("nsite-cli");
@@ -76,7 +93,14 @@ program
   .action(
     async (
       fileOrFolder: string,
-      options: { force: boolean; verbose: boolean; purge: boolean; servers?: string; relays?: string; privatekey?: string },
+      options: {
+        force: boolean;
+        verbose: boolean;
+        purge: boolean;
+        servers?: string;
+        relays?: string;
+        privatekey?: string;
+      },
     ) => {
       log("upload called", options);
       const projectData = readProjectFile();
@@ -95,60 +119,33 @@ program
       // TODO publish relay list kind 10002
 
       try {
-        const blossomServerEvent = await ndk.fetchEvent([
-          { kinds: [USER_BLOSSOM_SERVER_LIST_KIND], authors: [user.pubkey] },
+        const blossomServers = await findBlossomServers(ndk, user, [
+          ...(projectData?.servers || []),
+          ...(options.servers?.split(",") || []),
         ]);
-        const publicBlossomServers = blossomServerEvent
-          ? getServersFromServerListEvent(blossomServerEvent).map((u) => u.toString())
-          : [];
-
-        const blossomServers = [...publicBlossomServers];
-
-        // merge with servers from config/environment/cmd line
-        for (const bs of [...BLOSSOM_SERVERS, ...(projectData?.servers || []), ...(options.servers?.split(",") || [])]) {
-          if (!blossomServers.find((i) => areServersEqual(i, bs))) {
-            blossomServers.push(bs);
-          }
-        }
-
-        if (publicBlossomServers.length < blossomServers.length) {
-          log("Publishing blossom server list...");
-          await publishBlossomServerList(ndk, user.pubkey, blossomServers);
-        }
-
-        if (blossomServers.length == 0) throw new Error("No blossom servers found");
-
-        console.log("Using blossom servers: " + blossomServers.join(", "));
 
         const localFiles = await findAllLocalFiles(fileOrFolder);
         console.log(`${localFiles.length} files found locally in ${fileOrFolder}`);
-        if (options.verbose) {
-          log(localFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
-        }
+        logFiles(localFiles, options);
 
         const onlineFiles = await findRemoteFiles(ndk, user.pubkey);
         console.log(`${onlineFiles.length} files available online.`);
-        if (options.verbose) {
-          console.log(onlineFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
-        }
+        logFiles(onlineFiles, options);
 
-        const { toUpload, existing, toDelete } = await compareFileLists(localFiles, onlineFiles);
+        const { toTransfer, existing, toDelete } = await compareFileLists(localFiles, onlineFiles);
         console.log(
-          `${toUpload.length} new files to upload, ${existing.length} files unchanged, ${toDelete.length} files to delete online.`,
+          `${toTransfer.length} new files to upload, ${existing.length} files unchanged, ${toDelete.length} files to delete online.`,
         );
 
         if (options.force) {
           // If force option is selected, add all existing files to be uploaded again
-          toUpload.push(...existing);
+          toTransfer.push(...existing);
         }
 
-        if (toUpload.length > 0) {
-          await processUploads(ndk, toUpload, blossomServers, signEventTemplate);
+        if (toTransfer.length > 0) {
+          await processUploads(ndk, toTransfer, blossomServers, signEventTemplate);
         }
-
-        if (options.verbose) {
-          console.log(toUpload.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
-        }
+        logFiles(toTransfer, options);
 
         if (options.purge) {
           for await (const file of toDelete) {
@@ -181,94 +178,91 @@ program
   .command("ls")
   .argument("[npub]", "The public key (npub) of web content to list.")
   .option("-r, --relays <relays>", "The NOSTR relays to use (comma separated).", undefined)
+  .option("-k, --privatekey <nsec>", "The private key (nsec/hex) to use for signing.", undefined)
   .description("List all files available online")
-  .action(async (npub?: string) => {
-    const projectData = await setupProject();
-    if (!projectData.privateKey) return; // TODO handle error
-    // TODO allow use without a private key (npub only)
-
-    const user = await initNdk(projectData.privateKey, projectData.relays);
-    if (!ndk) return; // TODO handle error
-
+  .action(async (npub: string | undefined, options: { relays?: string; privatekey?: string }) => {
+    log("ls called", npub);
+    const projectData = readProjectFile();
     const optionalPubKey = npub && (nip19.decode(npub).data as string);
+    const privateKey = npub || options.privatekey || NOSTR_PRIVATE_KEY || projectData?.privateKey;
+    if (!privateKey) {
+      console.error("No private key found. Please set up a new project or specify a private key with --privatekey.");
+      process.exit(1);
+    }
+    const user = await initNdk(privateKey, [...(projectData?.relays || []), ...(options.relays?.split(",") || [])]);
+
+    if (!ndk) return;
+
     log("Listing web content for " + (npub || user.npub));
     const onlineFiles = await findRemoteFiles(ndk, optionalPubKey || user.pubkey);
-    console.log(onlineFiles.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
+    logFiles(onlineFiles, { verbose: true });
 
     process.exit(0);
   });
 
-async function onboarding() {
-  const readline = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+// Command: list all files available online
+program
+  .command("download")
+  .argument("<targetfolder>", "The folder where the files should be downloaded to.")
+  .argument("<npub>", "The public key (npub) of web content to download from.")
+  .option("-s, --servers <servers>", "The blossom servers to use (comma separated).", undefined)
+  .option("-r, --relays <relays>", "The NOSTR relays to use (comma separated).", undefined)
+  .option("-v, --verbose", "Verbose output, i.e. print lists of files uploaded.")
+  // TODO maybe add --watch option to watch for changes and re-download
+  .description("Download all files available online")
+  .action(
+    async (targetFolder: string, npub: string, options: { servers?: string; relays?: string; verbose: boolean }) => {
+      //    const projectData = await setupProject();
+      //  if (!projectData.privateKey) return; // TODO handle error
+      // TODO allow use without a private key (npub only)
+      debug(`download to ${targetFolder} from ${npub}`);
 
-  let privateKey: string;
-  const existingKey = await readline.question(
-    "\n1. Existing NOSTR private key (nsec/hex) or press Enter to create a NEW one:\n",
+      const user = await initNdk(npub, [...(options.relays?.split(",") || [])]);
+      if (!ndk) return; // TODO handle error
+
+      const blossomServers = await findBlossomServers(ndk, user, [...(options.servers?.split(",") || [])]);
+
+      const optionalPubKey = npub && (nip19.decode(npub).data as string);
+      log("Downloading web content for " + (npub || user.npub));
+      const onlineFiles = await findRemoteFiles(ndk, optionalPubKey || user.pubkey);
+      logFiles(onlineFiles, options);
+
+      const localFiles = await findAllLocalFiles(targetFolder);
+      console.log(`${localFiles.length} files found locally in ${targetFolder}`);
+      logFiles(localFiles, options);
+
+      const { toTransfer, existing, toDelete } = await compareFileLists(onlineFiles, localFiles);
+      console.log(
+        `${toTransfer.length} new files to download, ${existing.length} files unchanged, ${toDelete.length} files to delete locally.`,
+      );
+
+      for (const file of toTransfer) {
+        const filePath = path.join(targetFolder, file.remotePath);
+        const dir = path.dirname(filePath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        let downloadSuccess = false; // Track if download was successful
+        for (const server of blossomServers) {
+          // Loop through all servers
+          try {
+            const content = await BlossomClient.getBlob(server, file.sha256);
+            writeFileSync(filePath, Buffer.from(await content.arrayBuffer()));
+            log(`Downloaded ${file.remotePath} to ${filePath} from server ${server}`);
+            downloadSuccess = true; // Mark as successful
+            break; // Exit loop on success
+          } catch (error) {
+            log(`Failed to download ${file.remotePath} from server ${server}: ${error}`);
+          }
+        }
+        if (!downloadSuccess) {
+          log(`All attempts to download ${file.remotePath} failed.`);
+        }
+      }
+
+      process.exit(0);
+    },
   );
-
-  if (existingKey.trim()) {
-    if (existingKey.startsWith("nsec1")) {
-      privateKey = bytesToHex(nip19.decode(existingKey).data as Uint8Array);
-    } else {
-      privateKey = existingKey.trim();
-    }
-
-    log("Using provided private key.");
-  } else {
-    const signer = NDKPrivateKeySigner.generate();
-    privateKey = signer.privateKey!;
-    log("Generated new private key.");
-  }
-
-  try {
-    const signer = new NDKPrivateKeySigner(privateKey);
-    const user = await signer.user();
-    log("Using npub: " + user.npub);
-  } catch (e) {
-    log("Invalid private key!");
-    process.exit(1);
-  }
-
-  const askForList = async (prompt: string): Promise<string[]> => {
-    console.log(prompt);
-    const list: string[] = [];
-    while (true) {
-      const input = await readline.question("");
-      if (input.trim() === "") break;
-      list.push(input.trim());
-    }
-    return list;
-  };
-
-  const relays = await askForList("\n2. Enter multiple NOSTR relay URLs (e.g. wss://nos.lol) Press Enter to finish:");
-  const servers = await askForList(
-    "3. Enter multiple blossom server URLs (e.g. https://cdn.satellite.earth) Press Enter to finish:",
-  );
-
-  readline.close();
-
-  const projectData = { privateKey, relays, servers: servers };
-  writeProjectFile(projectData);
-}
-
-async function setupProject() {
-  let projectData = readProjectFile();
-  if (!projectData) {
-    console.log("nsite-cli: No existing project configuration found. Setting up a new one:");
-    await onboarding();
-    projectData = readProjectFile();
-  }
-
-  if (!projectData || !projectData.privateKey) {
-    console.error("Project data not found. Use nsite-cli genrate to set up a new project.");
-    process.exit(1);
-  }
-
-  return projectData;
-}
 
 program.action(async (cmdObj) => {
   const projectData = await setupProject();

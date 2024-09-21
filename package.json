@@ -1,16 +1,29 @@
 {
   "name": "nsite-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": "florian",
   "description": "nsite CLI - publish your site to NOSTR and blossom servers",
   "main": "dist/cli.js",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flox1an/nsite-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/flox1an/nsite-cli/issues"
+  },
+  "homepage": "https://github.com/flox1an/nsite-cli",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc && chmod +x dist/cli.js",
     "format": "prettier -w src/**.ts"
   },
-  "keywords": ["nostr", "blossom", "website", "publish"],
+  "keywords": [
+    "nostr",
+    "blossom",
+    "website",
+    "publish"
+  ],
   "license": "MIT",
   "dependencies": {
     "@noble/hashes": "^1.5.0",
