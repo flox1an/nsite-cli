@@ -4,6 +4,7 @@ import fs from "fs";
 import NDK from "@nostr-dev-kit/ndk";
 import { publishNSiteEvent } from "./nostr.js";
 import debug from "debug";
+import mime from "mime-types";
 
 const log = debug("nsite:upload");
 
@@ -22,7 +23,23 @@ export async function processUploads(
   for await (const f of filesToUpload) {
     log("Publishing ", f.localPath, f.remotePath, f.sha256);
     const buffer = fs.readFileSync(f.localPath);
-    const uploads = multiServerUpload(blossomServers, buffer, signEventTemplate);
+
+    const fileName = f.localPath.split("/").pop();
+    if (!fileName) {
+      throw new Error(`Could not determine file name for ${f.localPath}`);
+    }
+
+    const mimeType = mime.lookup(f.localPath);
+    if (!mimeType) {
+      throw new Error(`Could not determine MIME type for ${f.localPath}`);
+    }
+
+    const file = new File([buffer], fileName, {
+      type: mimeType,
+      lastModified: f.changedAt,
+    });
+
+    const uploads = multiServerUpload(blossomServers, file, signEventTemplate);
 
     let published = false;
     for await (const { blob, progress, server } of uploads) {
