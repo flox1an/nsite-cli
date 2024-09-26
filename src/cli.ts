@@ -242,7 +242,7 @@ program
       const user = await initNdk(npub, [...(options.relays?.split(",") || [])]);
       if (!ndk) return; // TODO handle error
 
-      const blossomServers = await findBlossomServers(ndk, user, [...(options.servers?.split(",") || [])]);
+      const blossomServers = await findBlossomServers(ndk, user, false, [...(options.servers?.split(",") || [])]);
 
       const optionalPubKey = npub && (nip19.decode(npub).data as string);
       log("Downloading web content for " + (npub || user.npub));
