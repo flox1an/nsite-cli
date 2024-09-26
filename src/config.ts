@@ -4,7 +4,13 @@ import path from "path";
 
 const log = debug("nsite:config");
 
-type ProjectData = { privateKey?: string; relays: string[]; servers: string[] };
+export type ProjectData = {
+  privateKey?: string;
+  relays: string[];
+  servers: string[];
+  publishServerList: boolean;
+  publishRelayList: boolean;
+};
 
 const configDir = ".nsite";
 const projectFile = "project.json";

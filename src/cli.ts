@@ -97,6 +97,8 @@ program
   .option("-k, --privatekey <nsec>", "The private key (nsec/hex) to use for signing.", undefined)
   .option("-p, --purge", "Delete online file events that are not used anymore.", false)
   .option("-v, --verbose", "Verbose output, i.e. print lists of files uploaded.")
+  .option("--publish-server-list", "Publish the list of blossom servers (Kind 10063).", false)
+  .option("--publish-relay-list", "Publish the list of NOSTR relays (Kind 10002).", false)
   .action(
     async (
       fileOrFolder: string,
@@ -107,6 +109,8 @@ program
         servers?: string;
         relays?: string;
         privatekey?: string;
+        publishServerList: boolean;
+        publishRelayList: boolean;
       },
     ) => {
       log("upload called", options);
@@ -120,14 +124,20 @@ program
       const user = await initNdk(privateKey, [...(projectData?.relays || []), ...(options.relays?.split(",") || [])]);
 
       if (!ndk) return;
+      console.log("Upload for user:      ", user.npub);
 
       const pool = ndk.outboxPool || ndk.pool;
       const relayUrls = [...pool.relays.values()].map((r) => r.url);
-      console.log("Using relays:", relayUrls.join(", "));
-      await broadcastRelayList(ndk, relayUrls, relayUrls);
+      console.log("Using relays:         ", relayUrls.join(", "));
+
+      if (options.publishRelayList || projectData?.publishRelayList) {
+        console.log("Publishing relay list (Kind 10002)...");
+        await broadcastRelayList(ndk, relayUrls, relayUrls);
+      }
 
       try {
-        const blossomServers = await findBlossomServers(ndk, user, [
+        const publishBlossomServerList = options.publishServerList || projectData?.publishServerList || false;
+        const blossomServers = await findBlossomServers(ndk, user, publishBlossomServerList, [
           ...(projectData?.servers || []),
           ...(options.servers?.split(",") || []),
         ]);
@@ -155,6 +165,7 @@ program
         }
         logFiles(toTransfer, options);
 
+        // TODO add an age option to only delete files that were changed before that date
         if (options.purge) {
           for await (const file of toDelete) {
             if (file.event) {
@@ -166,10 +177,13 @@ program
                   await BlossomClient.deleteBlob(s, file.sha256, deleteAuth);
                   log(`Deleted blob ${file.sha256} from server ${s}.`);
                 } catch (e) {
-                  console.error(`Error deleting blob ${file.sha256} from server ${s}:`, e);
+                  console.error(`Error deleting blob ${file.sha256} from server ${s}`);
+                  log(e);
                 }
               }
-              file.event.delete();
+              const deletionEvent = await file.event.delete();
+              deletionEvent.publish();
+              log(`Published deletion event ${deletionEvent.id}`);
             }
           }
         }

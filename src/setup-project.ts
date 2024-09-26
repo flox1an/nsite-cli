@@ -2,12 +2,12 @@ import { bytesToHex } from "@noble/hashes/utils";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import debug from "debug";
 import { createInterface } from "readline/promises";
-import { readProjectFile, writeProjectFile } from "./config.js";
+import { ProjectData, readProjectFile, writeProjectFile } from "./config.js";
 import { nip19 } from "nostr-tools";
 
 const log = debug("setup-project");
 
-async function onboarding() {
+async function onboarding(): Promise<void> {
   const readline = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -59,7 +59,13 @@ async function onboarding() {
 
   readline.close();
 
-  const projectData = { privateKey, relays, servers: servers };
+  const projectData: ProjectData = {
+    privateKey,
+    relays,
+    servers: servers,
+    publishServerList: true,
+    publishRelayList: true,
+  };
   writeProjectFile(projectData);
 }
 
