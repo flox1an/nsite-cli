@@ -3,7 +3,7 @@ import { WebSocket } from "ws";
 global.WebSocket = global.WebSocket || WebSocket;
 
 import { Command } from "commander";
-import { listRemoteFiles as findRemoteFiles } from "./nostr.js";
+import { broadcastRelayList, listRemoteFiles as findRemoteFiles } from "./nostr.js";
 import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "./files.js";
 import { processUploads } from "./upload.js";
 import NDK, { NDKEvent, NDKPrivateKeySigner, NDKUser } from "@nostr-dev-kit/ndk";
@@ -42,7 +42,7 @@ async function initNdk(privateKey: string, relays: string[] = []): Promise<NDKUs
     uniqueRelays = ["wss://nos.lol", "wss://relay.primal.net", "wss://relay.nostr.band", "wss://relay.damus.io"];
   }
 
-  log("Using relays: ", uniqueRelays.join(", "));
+  log("Using relays:", uniqueRelays.join(", "));
   ndk = new NDK({
     explicitRelayUrls: uniqueRelays,
   });
@@ -71,7 +71,14 @@ async function initNdk(privateKey: string, relays: string[] = []): Promise<NDKUs
 
 function logFiles(files: FileList, options: { verbose: boolean }) {
   if (options.verbose) {
-    console.log(files.map((f) => `${f.sha256}\t${f.changedAt}\t${f.remotePath}`).join("\n"));
+    console.log(
+      files
+        .map((f) => {
+          const date = f.changedAt ? new Date(f.changedAt * 1000).toISOString().slice(0, 19).replace("T", " ") : "-";
+          return `${f.sha256}\t${date}\t${f.remotePath}`;
+        })
+        .join("\n"),
+    );
   }
 }
 
@@ -115,8 +122,9 @@ program
       if (!ndk) return;
 
       const pool = ndk.outboxPool || ndk.pool;
-      console.log("Using relays: ", [...pool.relays.values()].map((r) => r.url).join(", "));
-      // TODO publish relay list kind 10002
+      const relayUrls = [...pool.relays.values()].map((r) => r.url);
+      console.log("Using relays:", relayUrls.join(", "));
+      await broadcastRelayList(ndk, relayUrls, relayUrls);
 
       try {
         const blossomServers = await findBlossomServers(ndk, user, [

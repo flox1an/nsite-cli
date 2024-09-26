@@ -1,4 +1,4 @@
-import NDK, { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import NDK, { NDKEvent, NDKPrivateKeySigner, NDKRelay, NDKRelayList, NDKRelaySet } from "@nostr-dev-kit/ndk";
 import { FileEntry, FileList } from "./types.js";
 import { USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
 import debug from "debug";
@@ -40,6 +40,9 @@ export async function listRemoteFiles(ndk: NDK, pubKey: string): Promise<FileLis
 }
 
 export async function publishNSiteEvent(ndk: NDK, pubkey: string, path: string, sha256: string) {
+  if (!path.startsWith('/')) {
+    path = '/' + path;
+  }
   const e = new NDKEvent(ndk, {
     pubkey,
     kind: NSITE_KIND,
@@ -71,4 +74,21 @@ export async function publishBlossomServerList(ndk: NDK, pubkey: string, servers
   await e.publish();
 
   log("Published blossom server list.", e.id);
+}
+
+export async function broadcastRelayList(ndk: NDK, readRelayUrls: string[], writeRelayUrls: string[]) {
+  const userRelayList = new NDKRelayList(ndk);
+  userRelayList.readRelayUrls = Array.from(readRelayUrls);
+  userRelayList.writeRelayUrls = Array.from(writeRelayUrls);
+
+  // const blastrUrl = 'wss://purplepag.es';
+  //ndk.pool.useTemporaryRelay(new NDKRelay(blastrUrl, undefined, ndk));
+  const broadCastRelaySet = NDKRelaySet.fromRelayUrls([
+      'wss://purplepag.es',
+       ...ndk.pool.urls(),
+ ], ndk);
+  log('relays sending to:', broadCastRelaySet.relayUrls);
+
+  const relaysPosted = await userRelayList.publish(broadCastRelaySet);
+  log(`relays posted to ${relaysPosted.size} relays`);
 }
