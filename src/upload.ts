@@ -29,10 +29,7 @@ export async function processUploads(
       throw new Error(`Could not determine file name for ${f.localPath}`);
     }
 
-    const mimeType = mime.lookup(f.localPath);
-    if (!mimeType) {
-      throw new Error(`Could not determine MIME type for ${f.localPath}`);
-    }
+    const mimeType = mime.lookup(f.localPath) || "application/octet-stream";
 
     const file = new File([buffer], fileName, {
       type: mimeType,

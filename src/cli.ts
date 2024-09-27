@@ -174,19 +174,25 @@ program
                 try {
                   // TODO how can we make sure we are not deleting blobs that are
                   // used otherwise!?
+                  console.log(`Deleting blob ${file.sha256} from server ${s}.`);
                   await BlossomClient.deleteBlob(s, file.sha256, deleteAuth);
-                  log(`Deleted blob ${file.sha256} from server ${s}.`);
                 } catch (e) {
-                  console.error(`Error deleting blob ${file.sha256} from server ${s}`);
-                  log(e);
+                  console.error(`Error deleting blob ${file.sha256} from server ${s}`, e);
                 }
               }
-              const deletionEvent = await file.event.delete();
-              deletionEvent.publish();
-              log(`Published deletion event ${deletionEvent.id}`);
+
+              try {
+                console.log(`Deleting event ${file.event?.id} from the relays.`);
+                const deletionEvent = await file.event.delete("File deletion through sync with nsite-cli.", true);
+                log(`Published deletion event ${deletionEvent.id}`);
+              } catch (e) {
+                console.error(`Error deleting event ${file.event?.id} from the relays.`, e);
+              }
             }
           }
         }
+
+        console.log(`The website is now available on any nsite gateway, e.g.: http://${user.npub}.nsite.lol`);
 
         process.exit(0);
       } catch (error) {
@@ -281,7 +287,6 @@ program
           log(`All attempts to download ${file.remotePath} failed.`);
         }
       }
-
       process.exit(0);
     },
   );
