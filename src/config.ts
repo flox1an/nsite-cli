@@ -8,8 +8,15 @@ export type ProjectData = {
   privateKey?: string;
   relays: string[];
   servers: string[];
+  profile?: {
+    name?: string;
+    about?: string;
+    nip05?: string;
+    picture?: string;
+  };
   publishServerList: boolean;
   publishRelayList: boolean;
+  publishProfile?: boolean;
 };
 
 const configDir = ".nsite";

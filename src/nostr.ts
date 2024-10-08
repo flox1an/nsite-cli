@@ -7,6 +7,17 @@ const log = debug("nsite:nostr");
 
 export const NSITE_KIND = 34128 as number;
 
+export type Profile = {
+  name?: string;
+  about?: string;
+  picture?: string;
+  display_name?: string;
+  website?: string;
+  nip05?: string;
+  lud16?: string;
+  banner?: string;
+};
+
 async function fetchPublicFileEvents(ndk: NDK, pubKey: string): Promise<FileList> {
   const events = await ndk.fetchEvents({ kinds: [NSITE_KIND], authors: [pubKey] }, { closeOnEose: true });
   const files: FileList = [];
@@ -40,8 +51,8 @@ export async function listRemoteFiles(ndk: NDK, pubKey: string): Promise<FileLis
 }
 
 export async function publishNSiteEvent(ndk: NDK, pubkey: string, path: string, sha256: string) {
-  if (!path.startsWith('/')) {
-    path = '/' + path;
+  if (!path.startsWith("/")) {
+    path = "/" + path;
   }
   const e = new NDKEvent(ndk, {
     pubkey,
@@ -81,14 +92,28 @@ export async function broadcastRelayList(ndk: NDK, readRelayUrls: string[], writ
   userRelayList.readRelayUrls = Array.from(readRelayUrls);
   userRelayList.writeRelayUrls = Array.from(writeRelayUrls);
 
-  // const blastrUrl = 'wss://purplepag.es';
-  //ndk.pool.useTemporaryRelay(new NDKRelay(blastrUrl, undefined, ndk));
-  const broadCastRelaySet = NDKRelaySet.fromRelayUrls([
-      'wss://purplepag.es',
-       ...ndk.pool.urls(),
- ], ndk);
-  log('relays sending to:', broadCastRelaySet.relayUrls);
+  const broadCastRelaySet = NDKRelaySet.fromRelayUrls(["wss://purplepag.es", ...ndk.pool.urls()], ndk);
+  log("relays sending to:", broadCastRelaySet.relayUrls);
 
   const relaysPosted = await userRelayList.publish(broadCastRelaySet);
   log(`relays posted to ${relaysPosted.size} relays`);
+}
+
+export async function publishProfile(ndk: NDK, profile: Profile) {
+  const broadCastRelaySet = NDKRelaySet.fromRelayUrls(["wss://purplepag.es", ...ndk.pool.urls()], ndk);
+  log("relays sending to:", broadCastRelaySet.relayUrls);
+
+  if (!ndk.activeUser) return;
+  const event = new NDKEvent(ndk, {
+    kind: 0, // Kind 0 represents a profile metadata event
+    content: JSON.stringify(profile), // Serialize the profile data into JSON
+    created_at: Math.floor(Date.now() / 1000), // Timestamp in seconds
+    tags: [],
+    pubkey: ndk.activeUser.pubkey,
+  });
+
+  await event.sign(); // Sign the event with your private key (handled by NDK)
+
+  const profilePosted = await event.publish(broadCastRelaySet);
+  log(`profile posted to ${profilePosted.size} relays`);
 }

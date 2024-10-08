@@ -37,10 +37,11 @@ export async function processUploads(
     });
 
     const uploads = multiServerUpload(blossomServers, file, signEventTemplate);
-
+    // TODO better error handling for 400, 402, 5xx ... for individual blossom servers
+    // TODO also test for servers that are not accessible
     let published = false;
     for await (const { blob, progress, server } of uploads) {
-      log("Uploaded", f.remotePath, `${server}/${blob}`);
+      console.log("Uploaded", f.remotePath, `${server}/${blob}`);
       if (!published) {
         await publishNSiteEvent(ndk, pubkey, f.remotePath, f.sha256);
       }

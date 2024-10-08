@@ -3,7 +3,7 @@ import { WebSocket } from "ws";
 global.WebSocket = global.WebSocket || WebSocket;
 
 import { Command } from "commander";
-import { broadcastRelayList, listRemoteFiles as findRemoteFiles } from "./nostr.js";
+import { broadcastRelayList, listRemoteFiles as findRemoteFiles, Profile, publishProfile } from "./nostr.js";
 import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "./files.js";
 import { processUploads } from "./upload.js";
 import NDK, { NDKEvent, NDKPrivateKeySigner, NDKUser } from "@nostr-dev-kit/ndk";
@@ -99,6 +99,8 @@ program
   .option("-v, --verbose", "Verbose output, i.e. print lists of files uploaded.")
   .option("--publish-server-list", "Publish the list of blossom servers (Kind 10063).", false)
   .option("--publish-relay-list", "Publish the list of NOSTR relays (Kind 10002).", false)
+  .option("--publish-profile", "Publish the app profile for the npub (Kind 0).", false)
+
   .action(
     async (
       fileOrFolder: string,
@@ -111,6 +113,7 @@ program
         privatekey?: string;
         publishServerList: boolean;
         publishRelayList: boolean;
+        publishProfile: boolean;
       },
     ) => {
       log("upload called", options);
@@ -135,6 +138,19 @@ program
         await broadcastRelayList(ndk, relayUrls, relayUrls);
       }
 
+      if (projectData?.profile && (options.publishProfile || projectData?.publishProfile)) {
+        // TODO check if any profile settings have changed!?
+        console.log("Publishing profile (Kind 0)...");
+        const { name, about, nip05, picture } = projectData?.profile;
+        await publishProfile(ndk, {
+          name,
+          display_name: name,
+          about,
+          nip05,
+          picture,
+        } as Profile);
+      }
+
       try {
         const publishBlossomServerList = options.publishServerList || projectData?.publishServerList || false;
         const blossomServers = await findBlossomServers(ndk, user, publishBlossomServerList, [
@@ -143,6 +159,7 @@ program
         ]);
 
         const localFiles = await findAllLocalFiles(fileOrFolder);
+        // TODO show file size for all files
         console.log(`${localFiles.length} files found locally in ${fileOrFolder}`);
         logFiles(localFiles, options);
 
@@ -196,7 +213,8 @@ program
 
         process.exit(0);
       } catch (error) {
-        log("Failed to fetch online files:", error);
+        console.error("Failed to fetch online files:", error);
+        process.exit(1);
       }
     },
   );
