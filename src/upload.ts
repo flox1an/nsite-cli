@@ -41,7 +41,7 @@ export async function processUploads(
     // TODO also test for servers that are not accessible
     let published = false;
     for await (const { blob, progress, server } of uploads) {
-      console.log("Uploaded", f.remotePath, `${server}/${blob}`);
+      console.log("Uploaded", f.remotePath, `${server}/${blob.sha256}`);
       if (!published) {
         await publishNSiteEvent(ndk, pubkey, f.remotePath, f.sha256);
       }

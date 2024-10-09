@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-import { WebSocket } from "ws";
-global.WebSocket = global.WebSocket || WebSocket;
-
+import './polyfill.js';
 import { Command } from "commander";
 import { broadcastRelayList, listRemoteFiles as findRemoteFiles, Profile, publishProfile } from "./nostr.js";
 import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "./files.js";

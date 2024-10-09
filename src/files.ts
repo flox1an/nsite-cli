@@ -3,6 +3,7 @@ import crypto from "crypto";
 import path from "path";
 import { FileEntry } from "./types.js";
 
+// TODO: sort local files desc, so root files are uploaded last
 export async function getLocalFiles(
   dirPath: string,
   arrayOfFiles: FileEntry[] = [],
