@@ -2,8 +2,8 @@
 
 This command line tool allows you to publish a static website on NOSTR in a anonymous and censorship resistant way.
 
-- The website file listings are published as events (kind 34128) on NOSTR relays.
-- The binary files are uploaded to a blossom servers.
+- The website file listings are published as events (`Kind 34128`) on NOSTR relays.
+- The binary files are uploaded to a blossom server ( https://github.com/hzrd149/blossom )
 - All data is signed with your private key, so it can not be altered by anyone else.
 
 ## Usage
@@ -75,6 +75,64 @@ Set a `NOSTR_PRIVATE_KEY` that will be used to publish events (nsec or hex strin
 export NOSTR_PRIVATE_KEY=<nsec or hex nostr private key>
 ```
 
+
+## Dynamic web app with browser based routing (e.g. React Browser Router)
+
+For deep linking into web apps that use browser based routing there needs to be a way to redirect 
+requests to the root `/index.html` to start the web apps. **nsite** solves this by using a `/404.html`. You can either 
+upload a custom `/404.html` file or use the `--fallback=/index.html` option to "redirect" to a specific html file. 
+This instructs `nsite-cli` to upload a copy of the specified fallback file as  `/404.html`.
+```
+npx nsite-cli upload dist --fallback=/index.html
+
+```
+Another way is to use the fallback option in the project config.
+```json
+{
+  "privateKey": "xxxxxxxxxx",
+  "relays": [
+    ...
+  ],
+  "servers": [
+    ...
+  ],
+  "fallback": "/index.html"
+}
+
+```
+
+
+## Connecting to Tor and I2P relays
+
+nsite-cli supports `ALL_PROXY` and other proxy env variables [here](https://www.npmjs.com/package/proxy-from-env#environment-variables)
+
+Install Tor ([Documentation](https://community.torproject.org/onion-services/setup/install/)) and I2Pd ([Documentation](https://i2pd.readthedocs.io/en/latest/user-guide/install/))
+
+Create a proxy.pac file
+
+```txt
+// SPDX-License-Identifier: CC0-1.0
+
+function FindProxyForURL(url, host)
+{
+  if (shExpMatch(host, "*.i2p"))
+  {
+    return "PROXY 127.0.0.1:4444; SOCKS5 127.0.0.1:4447";
+  }
+  if (shExpMatch(host, "*.onion"))
+  {
+    return "SOCKS5 127.0.0.1:9050";
+  }
+  return "DIRECT";
+}
+```
+
+Start the command with `PAC_PROXY` variable
+
+```sh
+PAC_PROXY=file://$(pwd)/proxy.pac npx nsite-cli .
+```
+
 ## Troubleshooting
 
 To enable debug logging, set the `DEBUG` environment variable to `nsite*` or even `*` to also see `ndk:*` logs
@@ -117,35 +175,4 @@ Or from the built javascript files using node
 
 ```
 node dist/cli.ts upload ./www
-```
-
-## Connecting to Tor and I2P relays
-
-nsite-cli supports `ALL_PROXY` and other proxy env variables [here](https://www.npmjs.com/package/proxy-from-env#environment-variables)
-
-Install Tor ([Documentation](https://community.torproject.org/onion-services/setup/install/)) and I2Pd ([Documentation](https://i2pd.readthedocs.io/en/latest/user-guide/install/))
-
-Create a proxy.pac file
-
-```txt
-// SPDX-License-Identifier: CC0-1.0
-
-function FindProxyForURL(url, host)
-{
-  if (shExpMatch(host, "*.i2p"))
-  {
-    return "PROXY 127.0.0.1:4444; SOCKS5 127.0.0.1:4447";
-  }
-  if (shExpMatch(host, "*.onion"))
-  {
-    return "SOCKS5 127.0.0.1:9050";
-  }
-  return "DIRECT";
-}
-```
-
-Start the command with `PAC_PROXY` variable
-
-```sh
-PAC_PROXY=file://$(pwd)/proxy.pac npx nsite-cli .
 ```

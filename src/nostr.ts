@@ -2,6 +2,7 @@ import NDK, { NDKEvent, NDKPrivateKeySigner, NDKRelay, NDKRelayList, NDKRelaySet
 import { FileEntry, FileList } from "./types.js";
 import { USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
 import debug from "debug";
+import { NSITE_BORADCAST_RELAYS } from "./env.js";
 
 const log = debug("nsite:nostr");
 
@@ -87,22 +88,23 @@ export async function publishBlossomServerList(ndk: NDK, pubkey: string, servers
   log("Published blossom server list.", e.id);
 }
 
+function getBroadcastRelays(ndk: NDK) {
+  const broadCastRelaySet = NDKRelaySet.fromRelayUrls([...NSITE_BORADCAST_RELAYS, ...ndk.pool.urls()], ndk);
+  log("relays to broadcast to:", broadCastRelaySet.relayUrls);
+  return broadCastRelaySet;
+}
+
 export async function broadcastRelayList(ndk: NDK, readRelayUrls: string[], writeRelayUrls: string[]) {
   const userRelayList = new NDKRelayList(ndk);
   userRelayList.readRelayUrls = Array.from(readRelayUrls);
   userRelayList.writeRelayUrls = Array.from(writeRelayUrls);
 
-  const broadCastRelaySet = NDKRelaySet.fromRelayUrls(["wss://purplepag.es", ...ndk.pool.urls()], ndk);
-  log("relays sending to:", broadCastRelaySet.relayUrls);
-
+  const broadCastRelaySet = getBroadcastRelays(ndk);
   const relaysPosted = await userRelayList.publish(broadCastRelaySet);
   log(`relays posted to ${relaysPosted.size} relays`);
 }
 
 export async function publishProfile(ndk: NDK, profile: Profile) {
-  const broadCastRelaySet = NDKRelaySet.fromRelayUrls(["wss://purplepag.es", ...ndk.pool.urls()], ndk);
-  log("relays sending to:", broadCastRelaySet.relayUrls);
-
   if (!ndk.activeUser) return;
   const event = new NDKEvent(ndk, {
     kind: 0, // Kind 0 represents a profile metadata event
@@ -114,6 +116,7 @@ export async function publishProfile(ndk: NDK, profile: Profile) {
 
   await event.sign(); // Sign the event with your private key (handled by NDK)
 
+  const broadCastRelaySet = getBroadcastRelays(ndk);
   const profilePosted = await event.publish(broadCastRelaySet);
   log(`profile posted to ${profilePosted.size} relays`);
 }

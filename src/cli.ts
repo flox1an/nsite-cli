@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import './polyfill.js';
+import "./polyfill.js";
 import { Command } from "commander";
 import { broadcastRelayList, listRemoteFiles as findRemoteFiles, Profile, publishProfile } from "./nostr.js";
 import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "./files.js";
@@ -15,6 +15,7 @@ import debug from "debug";
 import { findBlossomServers } from "./blossom.js";
 import { setupProject } from "./setup-project.js";
 import { FileList } from "./types.js";
+import { copyFile } from "fs/promises";
 
 const log = debug("nsite");
 const logSign = debug("nsite:sign");
@@ -98,6 +99,7 @@ program
   .option("--publish-server-list", "Publish the list of blossom servers (Kind 10063).", false)
   .option("--publish-relay-list", "Publish the list of NOSTR relays (Kind 10002).", false)
   .option("--publish-profile", "Publish the app profile for the npub (Kind 0).", false)
+  .option("--fallback", "an html file to copy and publish as 404.html")
 
   .action(
     async (
@@ -109,6 +111,7 @@ program
         servers?: string;
         relays?: string;
         privatekey?: string;
+        fallback?: string;
         publishServerList: boolean;
         publishRelayList: boolean;
         publishProfile: boolean;
@@ -156,7 +159,18 @@ program
           ...(options.servers?.split(",") || []),
         ]);
 
+        const fallbackFor404 = options.fallback || projectData?.fallback;
+        if (fallbackFor404) {
+          const sourceFolder = fileOrFolder.replace(/\/+$/, "");
+          const htmlSourcePath = `${sourceFolder}/${fallbackFor404.replace(/^\/+/, "")}`;
+          const fallback404Path = `${sourceFolder}/404.html`;
+          log(`copying 404 fallback from '${htmlSourcePath}' to '${fallback404Path}'`);
+          await copyFile(htmlSourcePath, fallback404Path);
+        }
+
         const localFiles = await findAllLocalFiles(fileOrFolder);
+        if (localFiles.length == 0) throw new Error(`No files found in local source folder ${fileOrFolder}.`);
+
         // TODO show file size for all files
         console.log(`${localFiles.length} files found locally in ${fileOrFolder}`);
         logFiles(localFiles, options);

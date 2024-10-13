@@ -17,6 +17,7 @@ export type ProjectData = {
   publishServerList: boolean;
   publishRelayList: boolean;
   publishProfile?: boolean;
+  fallback?: string;
 };
 
 const configDir = ".nsite";
