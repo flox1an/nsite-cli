@@ -1,6 +1,6 @@
 {
   "name": "nsite-cli",
-  "version": "0.1.10",
+  "version": "0.1.12",
   "author": "florian",
   "description": "nsite CLI - publish your site to NOSTR and blossom servers",
   "main": "dist/cli.js",
@@ -24,6 +24,10 @@
     "website",
     "publish"
   ],
+  "engines": {
+    "npm": ">=8.0.0 ",
+    "node": ">=20.0.0"
+  },
   "license": "MIT",
   "dependencies": {
     "@noble/hashes": "^1.5.0",
@@ -36,6 +40,7 @@
     "inquirer": "^12.0.0",
     "inquirer-autocomplete-standalone": "^0.8.1",
     "mime-types": "^2.1.35",
+    "node-fetch": "^3.3.2",
     "nostr-tools": "^2.7.2",
     "proxy-agent": "^6.4.0",
     "websocket-polyfill": "^1.0.0",
