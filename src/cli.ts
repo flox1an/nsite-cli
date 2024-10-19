@@ -221,7 +221,7 @@ program
           }
         }
 
-        console.log(`The website is now available on any nsite gateway, e.g.: http://${user.npub}.nsite.lol`);
+        console.log(`The website is now available on any nsite gateway, e.g.: https://${user.npub}.nsite.lol`);
 
         process.exit(0);
       } catch (error) {

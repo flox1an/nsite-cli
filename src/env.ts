@@ -16,3 +16,9 @@ export const NSITE_BORADCAST_RELAYS = process.env.NSITE_BORADCAST_RELAYS?.split(
   "wss://purplepag.es",
   "wss://user.kindpag.es",
 ];
+
+export const RELAY_DICOVERY_RELAYS = process.env.RELAY_DICOVERY_RELAYS?.split(",") || [
+  "wss://history.nostr.watch/",
+  "wss://relaypag.es/",
+  "wss://relay.nostr.watch/",
+];
