@@ -198,13 +198,13 @@ program
         if (options.purge) {
           for await (const file of toDelete) {
             if (file.event) {
-              const deleteAuth = await BlossomClient.getDeleteAuth(file.sha256, signEventTemplate);
+              const deleteAuth = await BlossomClient.createDeleteAuth(signEventTemplate, file.sha256);
               for await (const s of blossomServers) {
                 try {
                   // TODO how can we make sure we are not deleting blobs that are
                   // used otherwise!?
                   console.log(`Deleting blob ${file.sha256} from server ${s}.`);
-                  await BlossomClient.deleteBlob(s, file.sha256, deleteAuth);
+                  await BlossomClient.deleteBlob(s, file.sha256, { auth: deleteAuth });
                 } catch (e) {
                   console.error(`Error deleting blob ${file.sha256} from server ${s}`, e);
                 }
@@ -304,7 +304,7 @@ program
         for (const server of blossomServers) {
           // Loop through all servers
           try {
-            const content = await BlossomClient.getBlob(server, file.sha256);
+            const content = await BlossomClient.downloadBlob(server, file.sha256);
             writeFileSync(filePath, Buffer.from(await content.arrayBuffer()));
             log(`Downloaded ${file.remotePath} to ${filePath} from server ${server}`);
             downloadSuccess = true; // Mark as successful
