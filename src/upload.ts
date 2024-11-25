@@ -47,8 +47,6 @@ export async function processUploads(
           console.log("Uploaded", f.remotePath, `${server}/${getBlobSha256(blob)}`);
         },
         onAuth: (server, blob) => {
-          console.log("Authenticating", f.remotePath, server);
-
           return createUploadAuth(signEventTemplate, blob);
         },
       });
