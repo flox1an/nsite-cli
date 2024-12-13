@@ -2,7 +2,7 @@ import NDK, { NDKEvent, NDKKind, NDKPrivateKeySigner, NDKRelay, NDKRelayList, ND
 import { FileEntry, FileList } from "./types.js";
 import { USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
 import debug from "debug";
-import { NSITE_BORADCAST_RELAYS, RELAY_DICOVERY_RELAYS } from "./env.js";
+import { NSITE_BORADCAST_RELAYS, RELAY_DISCOVERY_RELAYS } from "./env.js";
 
 const log = debug("nsite:nostr");
 
@@ -126,7 +126,7 @@ function removeRelayUrlPath(s: string) {
 }
 
 export async function fetchNip66ListOfRelayUrls() {
-  const ndk = new NDK({ explicitRelayUrls: RELAY_DICOVERY_RELAYS });
+  const ndk = new NDK({ explicitRelayUrls: RELAY_DISCOVERY_RELAYS });
   ndk.connect();
   const events = await ndk.fetchEvents([{ kinds: [30166 as NDKKind] }], { closeOnEose: true });
   const uniqueRelayUrls = new Set(

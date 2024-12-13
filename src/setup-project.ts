@@ -5,7 +5,7 @@ import { ProjectData, readProjectFile, writeProjectFile } from "./config.js";
 import { nip19 } from "nostr-tools";
 import inquirer from "inquirer";
 import autocomplete from "inquirer-autocomplete-standalone";
-import { RELAY_DICOVERY_RELAYS } from "./env.js";
+import { RELAY_DISCOVERY_RELAYS } from "./env.js";
 import { fetchNip66ListOfRelayUrls } from "./nostr.js";
 
 const log = debug("setup-project");
