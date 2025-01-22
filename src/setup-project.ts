@@ -32,8 +32,6 @@ const popularBlossomServers = [
   "https://files.v0l.io",
 ];
 
-
-
 async function selectUrls(promptMessage: string, initialUrls: string[]): Promise<string[]> {
   let urls: string[] = [...initialUrls]; // Clone the initial URLs list
   let finalSelection: string[] = [];
@@ -123,7 +121,7 @@ async function onboarding(): Promise<void> {
     message: "3. Web site or project description:",
   });
 
-  console.log('Looking for public relays...');
+  console.log("Looking for public relays...");
   const knownRelays = await knownRelaysPromise;
   const relays = await selectUrls("4. NOSTR relay URLs:", knownRelays);
 
@@ -145,7 +143,6 @@ async function onboarding(): Promise<void> {
 }
 
 export async function setupProject(): Promise<ProjectData> {
-
   let projectData = readProjectFile();
   if (!projectData) {
     console.log("nsite-cli: No existing project configuration found. Setting up a new one:");

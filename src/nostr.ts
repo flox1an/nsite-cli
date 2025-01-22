@@ -122,7 +122,7 @@ export async function publishProfile(ndk: NDK, profile: Profile) {
 }
 
 function removeRelayUrlPath(s: string) {
-  return s.replace(/(ws:\/\/|wss:\/\/[^\/]+)\/?.*$/, '$1');
+  return s.replace(/(ws:\/\/|wss:\/\/[^\/]+)\/?.*$/, "$1");
 }
 
 export async function fetchNip66ListOfRelayUrls() {
@@ -130,9 +130,7 @@ export async function fetchNip66ListOfRelayUrls() {
   ndk.connect();
   const events = await ndk.fetchEvents([{ kinds: [30166 as NDKKind] }], { closeOnEose: true });
   const uniqueRelayUrls = new Set(
-    [...events.values()]
-      .map((e) => e.tagValue("d"))
-      .map((s) => s && removeRelayUrlPath(s)),
+    [...events.values()].map((e) => e.tagValue("d")).map((s) => s && removeRelayUrlPath(s)),
   );
   return ([...uniqueRelayUrls.values()].filter((s) => !!s) as string[]).sort();
 }
