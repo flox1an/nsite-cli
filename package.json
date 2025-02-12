@@ -1,6 +1,6 @@
 {
   "name": "nsite-cli",
-  "version": "0.1.12",
+  "version": "0.1.14",
   "author": "florian",
   "description": "nsite CLI - publish your site to NOSTR and blossom servers",
   "main": "dist/cli.js",
@@ -33,7 +33,7 @@
     "@noble/hashes": "^1.5.0",
     "@nostr-dev-kit/ndk": "^2.10.0",
     "axios": "^1.7.7",
-    "blossom-client-sdk": "^1.1.1",
+    "blossom-client-sdk": "^2.1.1",
     "commander": "^12.1.0",
     "debug": "^4.3.7",
     "dotenv": "^16.4.5",

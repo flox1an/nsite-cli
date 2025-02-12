@@ -1,10 +1,12 @@
 import { bytesToHex } from "@noble/hashes/utils";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import NDK, { NDKKind, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import debug from "debug";
 import { ProjectData, readProjectFile, writeProjectFile } from "./config.js";
 import { nip19 } from "nostr-tools";
 import inquirer from "inquirer";
 import autocomplete from "inquirer-autocomplete-standalone";
+import { RELAY_DISCOVERY_RELAYS } from "./env.js";
+import { fetchNip66ListOfRelayUrls } from "./nostr.js";
 
 const log = debug("setup-project");
 
@@ -44,7 +46,7 @@ async function selectUrls(promptMessage: string, initialUrls: string[]): Promise
           .filter((url) => !finalSelection.includes(url))
           .filter((url) => url.toLowerCase().includes(input.toLowerCase()));
         // If input doesn't match any URL, allow it to be the new URL
-        return Promise.resolve([...filteredUrls, input].map((s) => ({ value: s, name: s.length == 0 ? "Done." : s })));
+        return Promise.resolve([input, ...filteredUrls].map((s) => ({ value: s, name: s.length == 0 ? "Done." : s })));
       },
 
       validate: (input: string) => {
@@ -74,6 +76,7 @@ async function selectUrls(promptMessage: string, initialUrls: string[]): Promise
 
 async function onboarding(): Promise<void> {
   // TODO add web site name, so we can pblish it to the npubs profile
+  const knownRelaysPromise = fetchNip66ListOfRelayUrls();
 
   let privateKey: string;
   const { existingKey } = await inquirer.prompt([
@@ -118,7 +121,9 @@ async function onboarding(): Promise<void> {
     message: "3. Web site or project description:",
   });
 
-  const relays = await selectUrls("4. NOSTR relay URLs:", popularRelays);
+  console.log("Looking for public relays...");
+  const knownRelays = await knownRelaysPromise;
+  const relays = await selectUrls("4. NOSTR relay URLs:", knownRelays);
 
   const servers = await selectUrls("5. Blossom server URLs:", popularBlossomServers);
 

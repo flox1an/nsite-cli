@@ -1,10 +1,12 @@
-import { EventTemplate, multiServerUpload, SignedEvent } from "blossom-client-sdk";
-import { FileList } from "./types.js";
-import fs from "fs";
+import { createUploadAuth, EventTemplate, getBlobSha256, SignedEvent } from "blossom-client-sdk";
+import { multiServerUpload } from "blossom-client-sdk/actions/upload";
 import NDK from "@nostr-dev-kit/ndk";
-import { publishNSiteEvent } from "./nostr.js";
 import debug from "debug";
 import mime from "mime-types";
+
+import { FileList } from "./types.js";
+import fs from "fs";
+import { publishNSiteEvent } from "./nostr.js";
 
 const log = debug("nsite:upload");
 
@@ -37,15 +39,20 @@ export async function processUploads(
     });
 
     try {
-      const uploads = multiServerUpload(blossomServers, file, signEventTemplate);
-      // TODO better error handling for 400, 402, 5xx ... for individual blossom servers
-      // TODO also test for servers that are not accessible
-      let published = false;
-      for await (const { blob, progress, server } of uploads) {
-        console.log("Uploaded", f.remotePath, `${server}/${blob.sha256}`);
-        if (!published) {
-          await publishNSiteEvent(ndk, pubkey, f.remotePath, f.sha256);
-        }
+      const uploads = await multiServerUpload(blossomServers, file, {
+        onError(server, blob, error) {
+          console.log("Error", f.remotePath, server, error.message);
+        },
+        onUpload(server, blob) {
+          console.log("Uploaded", f.remotePath, `${server}/${getBlobSha256(blob)}`);
+        },
+        onAuth: (server, blob) => {
+          return createUploadAuth(signEventTemplate, blob);
+        },
+      });
+
+      if (Array.from(uploads.values()).length > 0) {
+        await publishNSiteEvent(ndk, pubkey, f.remotePath, f.sha256);
       }
     } catch (err) {
       console.error(`Error uploading '${file}'`, err);

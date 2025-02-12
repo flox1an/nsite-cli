@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 import "./polyfill.js";
 import { Command } from "commander";
+import NDK, { NDKEvent, NDKPrivateKeySigner, NDKUser } from "@nostr-dev-kit/ndk";
+import { BlossomClient, EventTemplate, SignedEvent } from "blossom-client-sdk";
+import { nip19 } from "nostr-tools";
+import { copyFile } from "fs/promises";
+import path from "path";
+import debug from "debug";
+
 import { broadcastRelayList, listRemoteFiles as findRemoteFiles, Profile, publishProfile } from "./nostr.js";
 import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "./files.js";
 import { processUploads } from "./upload.js";
-import NDK, { NDKEvent, NDKPrivateKeySigner, NDKUser } from "@nostr-dev-kit/ndk";
 import { NOSTR_PRIVATE_KEY, NOSTR_RELAYS } from "./env.js";
-import { nip19 } from "nostr-tools";
-import { BlossomClient, EventTemplate, SignedEvent } from "blossom-client-sdk";
-import path from "path";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { readProjectFile } from "./config.js";
-import debug from "debug";
 import { findBlossomServers } from "./blossom.js";
 import { setupProject } from "./setup-project.js";
 import { FileList } from "./types.js";
-import { copyFile } from "fs/promises";
 
 const log = debug("nsite");
 const logSign = debug("nsite:sign");
@@ -198,13 +199,13 @@ program
         if (options.purge) {
           for await (const file of toDelete) {
             if (file.event) {
-              const deleteAuth = await BlossomClient.getDeleteAuth(file.sha256, signEventTemplate);
+              const deleteAuth = await BlossomClient.createDeleteAuth(signEventTemplate, file.sha256);
               for await (const s of blossomServers) {
                 try {
                   // TODO how can we make sure we are not deleting blobs that are
                   // used otherwise!?
                   console.log(`Deleting blob ${file.sha256} from server ${s}.`);
-                  await BlossomClient.deleteBlob(s, file.sha256, deleteAuth);
+                  await BlossomClient.deleteBlob(s, file.sha256, { auth: deleteAuth });
                 } catch (e) {
                   console.error(`Error deleting blob ${file.sha256} from server ${s}`, e);
                 }
@@ -221,7 +222,7 @@ program
           }
         }
 
-        console.log(`The website is now available on any nsite gateway, e.g.: http://${user.npub}.nsite.lol`);
+        console.log(`The website is now available on any nsite gateway, e.g.: https://${user.npub}.nsite.lol`);
 
         process.exit(0);
       } catch (error) {
@@ -266,17 +267,22 @@ program
   .option("-s, --servers <servers>", "The blossom servers to use (comma separated).", undefined)
   .option("-r, --relays <relays>", "The NOSTR relays to use (comma separated).", undefined)
   .option("-v, --verbose", "Verbose output, i.e. print lists of files uploaded.")
+  .option("-p, --purge", "Delete extra local files.", false)
   // TODO maybe add --watch option to watch for changes and re-download
   .description("Download all files available online")
   .action(
-    async (targetFolder: string, npub: string, options: { servers?: string; relays?: string; verbose: boolean }) => {
+    async (
+      targetFolder: string,
+      npub: string,
+      options: { servers?: string; relays?: string; verbose: boolean; purge: boolean },
+    ) => {
       //    const projectData = await setupProject();
       //  if (!projectData.privateKey) return; // TODO handle error
       // TODO allow use without a private key (npub only)
       debug(`download to ${targetFolder} from ${npub}`);
 
       const user = await initNdk(npub, [...(options.relays?.split(",") || [])]);
-      if (!ndk) return; // TODO handle error
+      if (!ndk) throw new Error("Failed to initialize NDK");
 
       const blossomServers = await findBlossomServers(ndk, user, false, [...(options.servers?.split(",") || [])]);
 
@@ -294,17 +300,19 @@ program
         `${toTransfer.length} new files to download, ${existing.length} files unchanged, ${toDelete.length} files to delete locally.`,
       );
 
+      // Download new files
       for (const file of toTransfer) {
         const filePath = path.join(targetFolder, file.remotePath);
         const dir = path.dirname(filePath);
-        if (!existsSync(dir)) {
-          mkdirSync(dir, { recursive: true });
-        }
+
+        // Create the folder if it does not exist
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
         let downloadSuccess = false; // Track if download was successful
         for (const server of blossomServers) {
           // Loop through all servers
           try {
-            const content = await BlossomClient.getBlob(server, file.sha256);
+            const content = await BlossomClient.downloadBlob(server, file.sha256);
             writeFileSync(filePath, Buffer.from(await content.arrayBuffer()));
             log(`Downloaded ${file.remotePath} to ${filePath} from server ${server}`);
             downloadSuccess = true; // Mark as successful
@@ -314,9 +322,24 @@ program
           }
         }
         if (!downloadSuccess) {
-          log(`All attempts to download ${file.remotePath} failed.`);
+          console.log(`All attempts to download ${file.remotePath} failed.`);
         }
       }
+
+      // Remove unused files
+      if (options.purge) {
+        for (const file of toDelete) {
+          const filePath = path.join(targetFolder, file.remotePath);
+
+          try {
+            rmSync(filePath);
+          } catch (error) {
+            console.log(`Failed to delete ${file.localPath}`);
+            console.log(error);
+          }
+        }
+      }
+
       process.exit(0);
     },
   );
