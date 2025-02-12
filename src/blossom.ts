@@ -12,28 +12,47 @@ export async function findBlossomServers(
   publish: boolean,
   additionalServers?: string[],
 ): Promise<string[]> {
-  const blossomServerEvent = await ndk.fetchEvent([{ kinds: [USER_BLOSSOM_SERVER_LIST_KIND], authors: [user.pubkey] }]);
-  const publicBlossomServers = blossomServerEvent
-    ? getServersFromServerListEvent(blossomServerEvent).map((u) => u.toString())
-    : [];
-
-  const blossomServers = [...publicBlossomServers];
-
-  // merge with servers from config/environment/cmd line
-  for (const bs of [...BLOSSOM_SERVERS, ...(additionalServers || [])]) {
-    if (!blossomServers.find((i) => areServersEqual(i, bs))) {
-      blossomServers.push(bs);
-    }
-  }
-
-  // If new servers were added, publish the new blossom server list
-  if (publish && publicBlossomServers.length < blossomServers.length) {
-    console.log("Publishing blossom server list (Kind 10063)...");
-    await publishBlossomServerList(ndk, user.pubkey, blossomServers);
-  }
+  const blossomServers: string[] = mergeServers([...BLOSSOM_SERVERS, ...(additionalServers || [])]);
 
   if (blossomServers.length == 0) throw new Error("No blossom servers found");
 
+  if (publish) {
+    // If new servers were added, publish the new blossom server list
+
+    const blossomServerEvent = await ndk.fetchEvent([
+      { kinds: [USER_BLOSSOM_SERVER_LIST_KIND], authors: [user.pubkey] },
+    ]);
+    
+    const publicBlossomServers = blossomServerEvent
+      ? getServersFromServerListEvent(blossomServerEvent).map((u) => stripTrailingSlash(u.toString()))
+      : [];
+
+    if (
+      blossomServers.length !== publicBlossomServers.length ||
+      !blossomServers.every((bs) => publicBlossomServers.includes(bs))
+    ) {
+      console.log("Publishing blossom server list (Kind 10063)...");
+      await publishBlossomServerList(ndk, user.pubkey, blossomServers);
+    }
+  }
+
   console.log("Using blossom servers: " + blossomServers.join(", "));
+  return blossomServers;
+}
+
+function stripTrailingSlash(url: string) {
+  return url.replace(/\/$/, "");
+}
+
+function mergeServers(bunchOfServers: string[]) {
+  const blossomServers: string[] = [];
+
+  // merge with servers from config/environment/cmd line
+  for (const bs of bunchOfServers) {
+    const url = stripTrailingSlash(bs);
+    if (!blossomServers.find((i) => areServersEqual(i, url))) {
+      blossomServers.push(url);
+    }
+  }
   return blossomServers;
 }

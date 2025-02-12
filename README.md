@@ -16,7 +16,7 @@ There are two ways to use this tool.
    ```
    npx nsite-cli upload \
    --relays 'wss://nos.lol,wss://relay.primal.net,wss://relay.nostr.band,wss://relay.damus.io' \
-   --servers 'https://cdn.satellite.earth,https://files.v0l.io' \
+   --servers 'https://cdn.satellite.earth,https://nostr.download' \
    --privatekey <some secret nsec> \
    www
    ```
@@ -66,7 +66,7 @@ export NOSTR_RELAYS=wss://nos.lol,wss://relay.primal.net,wss://relay.nostr.band,
 The `BLOSSOM_SERVERS` can be used to specify the blossom servers:
 
 ```
-export BLOSSOM_SERVERS=https://media-server.slidestr.net/,https://files.v0l.io/
+export BLOSSOM_SERVERS=https://media-server.slidestr.net/,https://nostr.download/
 ```
 
 Set a `NOSTR_PRIVATE_KEY` that will be used to publish events (nsec or hex string) can be set as follows:
