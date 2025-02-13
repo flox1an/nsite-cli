@@ -155,7 +155,7 @@ program
 
       try {
         const publishBlossomServerList = options.publishServerList || projectData?.publishServerList || false;
-        const blossomServers = await findBlossomServers(ndk, user, publishBlossomServerList, [
+        const blossomServers = await findBlossomServers(ndk, user, false, publishBlossomServerList, [
           ...(projectData?.servers || []),
           ...(options.servers?.split(",") || []),
         ]);
@@ -284,7 +284,7 @@ program
       const user = await initNdk(npub, [...(options.relays?.split(",") || [])]);
       if (!ndk) throw new Error("Failed to initialize NDK");
 
-      const blossomServers = await findBlossomServers(ndk, user, false, [...(options.servers?.split(",") || [])]);
+      const blossomServers = await findBlossomServers(ndk, user, true, false, [...(options.servers?.split(",") || [])]);
 
       const optionalPubKey = npub && (nip19.decode(npub).data as string);
       log("Downloading web content for " + (npub || user.npub));

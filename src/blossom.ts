@@ -9,23 +9,24 @@ const log = debug("blossom");
 export async function findBlossomServers(
   ndk: NDK,
   user: NDKUser,
-  publish: boolean,
+  useUserServerList: boolean,
+  publishUserServerList: boolean,
   additionalServers?: string[],
 ): Promise<string[]> {
-  const blossomServers: string[] = mergeServers([...BLOSSOM_SERVERS, ...(additionalServers || [])]);
+  const blossomServerEvent = await ndk.fetchEvent([{ kinds: [USER_BLOSSOM_SERVER_LIST_KIND], authors: [user.pubkey] }]);
+
+  const publicBlossomServers = blossomServerEvent
+    ? getServersFromServerListEvent(blossomServerEvent).map((u) => stripTrailingSlash(u.toString()))
+    : [];
+
+  const blossomServers: string[] = useUserServerList
+    ? mergeServers([...publicBlossomServers, ...BLOSSOM_SERVERS, ...(additionalServers || [])])
+    : mergeServers([...BLOSSOM_SERVERS, ...(additionalServers || [])]);
 
   if (blossomServers.length == 0) throw new Error("No blossom servers found");
 
-  if (publish) {
+  if (publishUserServerList) {
     // If new servers were added, publish the new blossom server list
-
-    const blossomServerEvent = await ndk.fetchEvent([
-      { kinds: [USER_BLOSSOM_SERVER_LIST_KIND], authors: [user.pubkey] },
-    ]);
-    
-    const publicBlossomServers = blossomServerEvent
-      ? getServersFromServerListEvent(blossomServerEvent).map((u) => stripTrailingSlash(u.toString()))
-      : [];
 
     if (
       blossomServers.length !== publicBlossomServers.length ||
