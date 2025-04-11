@@ -74,13 +74,16 @@ export default function registerUploadCommand(program: Command) {
 
         if (projectData?.profile && (options.publishProfile || projectData?.publishProfile)) {
           console.log("Publishing profile (Kind 0)...");
-          const { name, about, nip05, picture } = projectData.profile;
+          const { name, about, nip05, picture, website, lud16, banner } = projectData.profile;
           await publishProfile(getNDK()!, {
             name,
             display_name: name,
             about,
             nip05,
             picture,
+            website,
+            lud16,
+            banner,
           } as Profile);
         }
 
