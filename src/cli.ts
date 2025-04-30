@@ -83,7 +83,10 @@ function logFiles(files: FileList, options: { verbose: boolean }) {
 
 const program = new Command("nsite-cli");
 
-// TODO add rate limiting for certain relays
+// Register each command with the program
+registerUploadCommand(program);
+registerLsCommand(program);
+registerDownloadCommand(program);
 
 // Command: upload files
 program

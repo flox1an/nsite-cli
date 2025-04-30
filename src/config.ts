@@ -1,6 +1,7 @@
 import debug from "debug";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
+import { Profile } from "./nostr.js";
 
 const log = debug("nsite:config");
 
@@ -8,12 +9,7 @@ export type ProjectData = {
   privateKey?: string;
   relays: string[];
   servers: string[];
-  profile?: {
-    name?: string;
-    about?: string;
-    nip05?: string;
-    picture?: string;
-  };
+  profile?: Profile;
   publishServerList: boolean;
   publishRelayList: boolean;
   publishProfile?: boolean;

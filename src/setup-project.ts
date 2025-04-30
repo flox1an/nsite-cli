@@ -29,7 +29,7 @@ const popularBlossomServers = [
   "https://blossom.primal.net",
   "https://cdn.nostrcheck.me",
   "https://cdn.satellite.earth",
-  "https://files.v0l.io",
+  "https://nostr.download",
 ];
 
 async function selectUrls(promptMessage: string, initialUrls: string[]): Promise<string[]> {
