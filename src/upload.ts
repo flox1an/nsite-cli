@@ -1,16 +1,21 @@
+import NDK from "@nostr-dev-kit/ndk";
 import { BlossomClient, EventTemplate, SignedEvent } from "blossom-client-sdk";
 import { multiServerUpload } from "blossom-client-sdk/actions/multi-server";
-import NDK from "@nostr-dev-kit/ndk";
 import debug from "debug";
+import fs from "fs";
 import mime from "mime-types";
 import pLimit from "p-limit";
 
-import { FileList } from "./types.js";
-import fs from "fs";
+import { colors } from "./colors.js";
 import { publishNSiteEvent } from "./nostr.js";
-import { colors, formatFileStatus } from "./colors.js";
+import { FileList } from "./types.js";
 
 const log = debug("nsite:upload");
+
+export function formatFileStatus(fileName: string, action: string, details?: string): string {
+  const detailsText = details ? ` (${details})` : "";
+  return `${action} ${colors.filePath(fileName)}${detailsText}`;
+}
 
 export interface UploadOptions {
   concurrency?: number;
@@ -25,9 +30,7 @@ export async function processUploads(
 ) {
   const pubkey = ndk.activeUser?.pubkey;
 
-  if (!pubkey) {
-    throw new Error("User Pubkey not found.");
-  }
+  if (!pubkey) throw new Error("User Pubkey not found.");
 
   if (filesToUpload.length === 0) {
     console.log("No files to upload.");
@@ -63,9 +66,6 @@ export async function processUploads(
       // Mark this file as active
       const startTime = Date.now();
       activeUploads.set(shortFileName, { file: f.remotePath, startTime });
-
-      // Show which file we're starting to process
-      console.log(formatFileStatus(shortFileName, colors.emphasis("→ Uploading")));
 
       log("Publishing ", f.localPath, f.remotePath, f.sha256);
 
@@ -130,7 +130,7 @@ export async function processUploads(
               formatFileStatus(
                 shortFileName,
                 colors.success("✓ Uploaded"),
-                `${status} (${colors.error(failCount)} failed)`,
+                `${status} ${colors.error(failCount)} failed`,
               ),
             );
           } else {
@@ -176,8 +176,6 @@ export async function processUploads(
   console.log(`- Total files: ${colors.count(filesToUpload.length)}`);
   console.log(`- Successfully uploaded: ${colors.success(results.successful)}`);
   console.log(`- Failed: ${results.failed > 0 ? colors.error(results.failed) : colors.success(0)}`);
-
-  log("processUpload() ended.");
 
   return results;
 }

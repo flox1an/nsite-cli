@@ -44,7 +44,6 @@
     "node-fetch": "^3.3.2",
     "nostr-tools": "^2.12.0",
     "p-limit": "^4.0.0",
-    "progress": "^2.0.3",
     "proxy-agent": "^6.5.0",
     "websocket-polyfill": "^1.0.0",
     "ws": "^8.18.1"
@@ -53,7 +52,6 @@
     "@types/debug": "^4.1.12",
     "@types/mime-types": "^2.1.4",
     "@types/node": "^22.14.0",
-    "@types/progress": "^2.0.7",
     "@types/ws": "^8.18.1",
     "prettier": "^3.5.3",
     "typescript": "^5.8.3"

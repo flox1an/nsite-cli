@@ -50,9 +50,6 @@ importers:
       p-limit:
         specifier: ^4.0.0
         version: 4.0.0
-      progress:
-        specifier: ^2.0.3
-        version: 2.0.3
       proxy-agent:
         specifier: ^6.5.0
         version: 6.5.0
@@ -72,9 +69,6 @@ importers:
       '@types/node':
         specifier: ^22.14.0
         version: 22.14.0
-      '@types/progress':
-        specifier: ^2.0.7
-        version: 2.0.7
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -294,9 +288,6 @@ packages:
 
   '@types/node@22.14.0':
     resolution: {integrity: sha512-Kmpl+z84ILoG+3T/zQFyAJsU6EPTmOCj8/2+83fSN6djd6I4o7uOuGIH6vq3PrjY5BGitSbFuMN18j3iknubbA==}
-
-  '@types/progress@2.0.7':
-    resolution: {integrity: sha512-iadjw02vte8qWx7U0YM++EybBha2CQLPGu9iJ97whVgJUT5Zq9MjAPYUnbfRI2Kpehimf1QjFJYxD0t8nqzu5w==}
 
   '@types/wrap-ansi@3.0.0':
     resolution: {integrity: sha512-ltIpx+kM7g/MLRZfkbL7EsCEjfzCcScLpkg37eXEtx5kmrAKBkTJwd1GIAjDSL8wTpM6Hzn5YO4pSb91BEwu1g==}
@@ -701,10 +692,6 @@ packages:
     engines: {node: '>=14'}
     hasBin: true
 
-  progress@2.0.3:
-    resolution: {integrity: sha512-7PiHtLll5LdnKIMw100I+8xJXR5gW2QwWYkT6iJva0bXitZKa/XMrSbdmg3r2Xnaidz9Qumd0VPaMrZlF9V9sA==}
-    engines: {node: '>=0.4.0'}
-
   proxy-agent@6.5.0:
     resolution: {integrity: sha512-TmatMXdr2KlRiA2CyDu8GqR8EjahTG3aY3nXjdzFyoZbmB8hrBsTyMezhULIXKnC0jpfjlmiZ3+EaCzoInSu/A==}
     engines: {node: '>= 14'}
@@ -1083,10 +1070,6 @@ snapshots:
   '@types/node@22.14.0':
     dependencies:
       undici-types: 6.21.0
-
-  '@types/progress@2.0.7':
-    dependencies:
-      '@types/node': 22.14.0
 
   '@types/wrap-ansi@3.0.0': {}
 
@@ -1479,8 +1462,6 @@ snapshots:
   picocolors@1.1.1: {}
 
   prettier@3.5.3: {}
-
-  progress@2.0.3: {}
 
   proxy-agent@6.5.0:
     dependencies:

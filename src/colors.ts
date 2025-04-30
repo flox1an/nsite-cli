@@ -31,14 +31,6 @@ export const colors = {
 };
 
 /**
- * Formats a file status message consistently
- */
-export function formatFileStatus(fileName: string, action: string, details?: string): string {
-  const detailsText = details ? ` (${details})` : "";
-  return `${action} ${colors.filePath(fileName)}${detailsText}`;
-}
-
-/**
  * Formats a summary line with counts
  */
 export function formatSummary(label: string, count: number, total?: number): string {
