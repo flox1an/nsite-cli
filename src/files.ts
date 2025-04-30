@@ -1,6 +1,7 @@
 import fs from "fs";
 import crypto from "crypto";
 import path from "path";
+
 import { FileEntry } from "./types.js";
 
 // TODO: sort local files desc, so root files are uploaded last
@@ -38,11 +39,7 @@ export async function getLocalFiles(
 export async function compareFiles(
   sourceFiles: FileEntry[],
   targetFiles: FileEntry[],
-): Promise<{
-  toTransfer: FileEntry[];
-  existing: FileEntry[];
-  toDelete: FileEntry[];
-}> {
+): Promise<{ toTransfer: FileEntry[]; existing: FileEntry[]; toDelete: FileEntry[] }> {
   const toTransfer: FileEntry[] = [];
   const existing: FileEntry[] = [];
   const toDelete: FileEntry[] = [];

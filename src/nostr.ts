@@ -1,8 +1,9 @@
-import NDK, { NDKEvent, NDKKind, NDKPrivateKeySigner, NDKRelay, NDKRelayList, NDKRelaySet } from "@nostr-dev-kit/ndk";
-import { FileEntry, FileList } from "./types.js";
+import NDK, { NDKEvent, NDKKind, NDKRelayList, NDKRelaySet } from "@nostr-dev-kit/ndk";
 import { USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
 import debug from "debug";
+
 import { NSITE_BORADCAST_RELAYS, RELAY_DISCOVERY_RELAYS } from "./env.js";
+import { FileEntry, FileList } from "./types.js";
 
 const log = debug("nsite:nostr");
 

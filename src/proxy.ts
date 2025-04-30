@@ -1,5 +1,6 @@
 import { ProxyAgent } from "proxy-agent";
 import { PacProxyAgent } from "pac-proxy-agent";
+
 import { I2P_PROXY, PAC_PROXY, TOR_PROXY } from "./env.js";
 
 function buildPacURI() {
@@ -49,7 +50,7 @@ function buildProxy() {
     if (I2P_PROXY) console.log("I2P connection enabled");
 
     return new PacProxyAgent(buildPacURI());
-  } else return new ProxyAgent({ keepAlive: true });
+  } else return new ProxyAgent({ keepAlive: true, fallbackToDirect: true });
 }
 
 const agent = buildProxy();

@@ -31,30 +31,33 @@
   "license": "MIT",
   "dependencies": {
     "@noble/hashes": "^1.7.1",
-    "@nostr-dev-kit/ndk": "^2.11.0",
-    "axios": "^1.7.9",
-    "blossom-client-sdk": "^2.1.1",
-    "commander": "^13.1.0",
+    "@nostr-dev-kit/ndk": "^2.13.0",
+    "axios": "^1.8.4",
+    "blossom-client-sdk": "^3.0.1",
+    "chalk": "^5.4.1",
+    "commander": "^12.1.0",
     "debug": "^4.4.0",
     "dotenv": "^16.4.7",
-    "inquirer": "^12.4.1",
+    "inquirer": "^12.5.2",
     "inquirer-autocomplete-standalone": "^0.8.1",
     "mime-types": "^2.1.35",
     "node-fetch": "^3.3.2",
-    "nostr-tools": "^2.10.4",
+    "nostr-tools": "^2.12.0",
+    "p-limit": "^4.0.0",
     "proxy-agent": "^6.5.0",
     "websocket-polyfill": "^1.0.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
     "@types/mime-types": "^2.1.4",
-    "@types/node": "^22.13.1",
-    "@types/ws": "^8.5.14",
-    "prettier": "^3.5.0",
-    "typescript": "^5.7.3"
+    "@types/node": "^22.14.0",
+    "@types/ws": "^8.18.1",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3"
   },
   "bin": {
     "nsite-cli": "dist/cli.js"
-  }
+  },
+  "packageManager": "pnpm@9.15.6+sha512.139cab068fdf0b751268179ac5f909b5be72afb4a75c513d1905d151befc8977b593d3cf8671ed83d4d6637c5c94b98ffbce108125de4a5a27a31233601a99de"
 }

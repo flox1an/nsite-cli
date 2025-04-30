@@ -1,10 +1,9 @@
 import NDK, { NDKUser } from "@nostr-dev-kit/ndk";
 import { areServersEqual, getServersFromServerListEvent, USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
-import { publishBlossomServerList } from "./nostr.js";
-import debug from "debug";
-import { BLOSSOM_SERVERS } from "./env.js";
 
-const log = debug("blossom");
+import { BLOSSOM_SERVERS } from "./env.js";
+import { publishBlossomServerList } from "./nostr.js";
+import { colors } from "./colors.js";
 
 export async function findBlossomServers(
   ndk: NDK,
@@ -37,7 +36,7 @@ export async function findBlossomServers(
     }
   }
 
-  console.log("Using blossom servers: " + blossomServers.join(", "));
+  console.log("Using blossom servers: " + blossomServers.map((s) => colors.url(s)).join(", "));
   return blossomServers;
 }
 

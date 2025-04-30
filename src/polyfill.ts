@@ -1,7 +1,8 @@
 import { ClientOptions, WebSocket } from "ws";
 import { ClientRequestArgs } from "http";
-import agent from "./proxy.js";
 import fetch from "node-fetch";
+
+import agent from "./proxy.js";
 
 class ProxyWebSocket extends WebSocket {
   constructor(address: string | URL, options?: ClientOptions | ClientRequestArgs) {
@@ -12,10 +13,7 @@ class ProxyWebSocket extends WebSocket {
 global.WebSocket = agent ? ProxyWebSocket : WebSocket;
 
 const proxiedFetch = (url: string, options: any = {}) => {
-  return fetch(url, {
-    ...options,
-    agent,
-  });
+  return fetch(url, { ...options, agent });
 };
 
 // Override global fetch with Proxy-fetch

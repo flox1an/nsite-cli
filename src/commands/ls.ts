@@ -1,9 +1,10 @@
 import { Command } from "commander";
 import debug from "debug";
 import { nip19 } from "nostr-tools";
-import { initNdk, logFiles, getNDK } from "./common.js";
+
 import { readProjectFile } from "../config.js";
 import { listRemoteFiles as findRemoteFiles } from "../nostr.js";
+import { getNDK, initNdk, logFiles } from "./common.js";
 
 const log = debug("nsite");
 

@@ -1,18 +1,18 @@
-import { Command } from "commander";
-import { copyFile } from "fs/promises";
-import debug from "debug";
 import { NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
 import { BlossomClient } from "blossom-client-sdk";
-import { broadcastRelayList, listRemoteFiles as findRemoteFiles, Profile, publishProfile } from "../nostr.js";
-import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "../files.js";
-import { processUploads } from "../upload.js";
-import { readProjectFile } from "../config.js";
-import { findBlossomServers } from "../blossom.js";
+import { Command } from "commander";
+import debug from "debug";
+import { copyFile } from "fs/promises";
 
-import { initNdk, signEventTemplate, logFiles, getNDK } from "./common.js";
+import { findBlossomServers } from "../blossom.js";
+import { readProjectFile } from "../config.js";
+import { compareFiles as compareFileLists, getLocalFiles as findAllLocalFiles } from "../files.js";
+import { broadcastRelayList, listRemoteFiles as findRemoteFiles, Profile, publishProfile } from "../nostr.js";
+import { processUploads } from "../upload.js";
+import { getNDK, initNdk, logFiles, signEventTemplate } from "./common.js";
+import { colors } from "../colors.js";
 
 const log = debug("nsite");
-const logSign = debug("nsite:sign");
 
 export default function registerUploadCommand(program: Command) {
   program
@@ -24,6 +24,7 @@ export default function registerUploadCommand(program: Command) {
     .option("-r, --relays <relays>", "The NOSTR relays to use (comma separated).", undefined)
     .option("-k, --privatekey <nsec>", "The private key (nsec/hex) to use for signing.", undefined)
     .option("-p, --purge", "Delete online file events that are not used anymore.", false)
+    .option("-c, --concurrency <number>", "Number of concurrent uploads (default: 5)", "5")
     .option("-v, --verbose", "Verbose output, i.e. print lists of files uploaded.")
     .option("--publish-server-list", "Publish the list of blossom servers (Kind 10063).", false)
     .option("--publish-relay-list", "Publish the list of NOSTR relays (Kind 10002).", false)
@@ -40,6 +41,7 @@ export default function registerUploadCommand(program: Command) {
           relays?: string;
           privatekey?: string;
           fallback?: string;
+          concurrency?: string;
           publishServerList: boolean;
           publishRelayList: boolean;
           publishProfile: boolean;
@@ -61,11 +63,11 @@ export default function registerUploadCommand(program: Command) {
         ]);
 
         if (!getNDK()) return;
-        console.log("Upload for user:      ", user.npub);
+        console.log("Upload for user:      ", colors.emphasis(user.npub));
 
         const pool = getNDK()!.outboxPool || getNDK()!.pool;
         const relayUrls = [...pool.relays.values()].map((r) => r.url);
-        console.log("Using relays:         ", relayUrls.join(", "));
+        console.log("Using relays:         ", relayUrls.map((url) => colors.url(url)).join(", "));
 
         if (options.publishRelayList || projectData?.publishRelayList) {
           console.log("Publishing relay list (Kind 10002)...");
@@ -106,16 +108,16 @@ export default function registerUploadCommand(program: Command) {
           const localFiles = await findAllLocalFiles(fileOrFolder);
           if (localFiles.length === 0) throw new Error(`No files found in local source folder ${fileOrFolder}.`);
 
-          console.log(`${localFiles.length} files found locally in ${fileOrFolder}`);
+          console.log(`${colors.count(localFiles.length)} files found locally in ${colors.filePath(fileOrFolder)}`);
           logFiles(localFiles, options);
 
           const onlineFiles = await findRemoteFiles(getNDK()!, user.pubkey);
-          console.log(`${onlineFiles.length} files available online.`);
+          console.log(`${colors.count(onlineFiles.length)} files available online.`);
           logFiles(onlineFiles, options);
 
           const { toTransfer, existing, toDelete } = await compareFileLists(localFiles, onlineFiles);
           console.log(
-            `${toTransfer.length} new files to upload, ${existing.length} files unchanged, ${toDelete.length} files to delete online.`,
+            `${colors.count(toTransfer.length)} new files to upload, ${colors.count(existing.length)} files unchanged, ${colors.count(toDelete.length)} files to delete online.`,
           );
 
           if (options.force) {
@@ -123,7 +125,9 @@ export default function registerUploadCommand(program: Command) {
           }
 
           if (toTransfer.length > 0) {
-            await processUploads(getNDK()!, toTransfer, blossomServers, signEventTemplate);
+            await processUploads(getNDK()!, toTransfer, blossomServers, signEventTemplate, {
+              concurrency: options.concurrency ? parseInt(options.concurrency) : 5,
+            });
           }
           logFiles(toTransfer, options);
 
@@ -133,28 +137,33 @@ export default function registerUploadCommand(program: Command) {
                 const deleteAuth = await BlossomClient.createDeleteAuth(signEventTemplate, file.sha256);
                 for await (const s of blossomServers) {
                   try {
-                    console.log(`Deleting blob ${file.sha256} from server ${s}.`);
+                    console.log(`Deleting blob ${colors.emphasis(file.sha256)} from server ${colors.url(s)}.`);
                     await BlossomClient.deleteBlob(s, file.sha256, { auth: deleteAuth });
                   } catch (e) {
-                    console.error(`Error deleting blob ${file.sha256} from server ${s}`, e);
+                    console.error(
+                      `Error deleting blob ${colors.emphasis(file.sha256)} from server ${colors.url(s)}`,
+                      e,
+                    );
                   }
                 }
 
                 try {
-                  console.log(`Deleting event ${file.event?.id} from the relays.`);
+                  console.log(`Deleting event ${colors.emphasis(file.event?.id)} from the relays.`);
                   const deletionEvent: NDKEvent = await file.event.delete(
                     "File deletion through sync with nsite-cli.",
                     true,
                   );
                   log(`Published deletion event ${deletionEvent.id}`);
                 } catch (e) {
-                  console.error(`Error deleting event ${file.event?.id} from the relays.`, e);
+                  console.error(`Error deleting event ${colors.emphasis(file.event?.id)} from the relays.`, e);
                 }
               }
             }
           }
 
-          console.log(`The website is now available on any nsite gateway, e.g.: https://${user.npub}.nsite.lol`);
+          console.log(
+            `The website is now available on any nsite gateway, e.g.: ${colors.url(`https://${user.npub}.nsite.lol`)}`,
+          );
 
           process.exit(0);
         } catch (error) {

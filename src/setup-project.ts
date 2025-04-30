@@ -1,11 +1,11 @@
 import { bytesToHex } from "@noble/hashes/utils";
-import NDK, { NDKKind, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import debug from "debug";
-import { ProjectData, readProjectFile, writeProjectFile } from "./config.js";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import autocomplete from "inquirer-autocomplete-standalone";
 import { nip19 } from "nostr-tools";
 import inquirer from "inquirer";
-import autocomplete from "inquirer-autocomplete-standalone";
-import { RELAY_DISCOVERY_RELAYS } from "./env.js";
+import debug from "debug";
+
+import { ProjectData, readProjectFile, writeProjectFile } from "./config.js";
 import { fetchNip66ListOfRelayUrls } from "./nostr.js";
 
 const log = debug("setup-project");
@@ -131,10 +131,7 @@ async function onboarding(): Promise<void> {
     privateKey,
     relays,
     servers: servers,
-    profile: {
-      name: projectName,
-      about: projectAbout,
-    },
+    profile: { name: projectName, about: projectAbout },
     publishProfile: projectName.length > 0 || projectAbout.length > 0,
     publishServerList: true,
     publishRelayList: true,
