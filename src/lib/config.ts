@@ -145,16 +145,23 @@ function sanitizeBunkerUrl(url: string): string {
 export function writeProjectFile(config: ProjectConfig, configPath?: string): void {
   const cwd = Deno.cwd();
 
-  // Prevent writing config in test environments or temp directories (only for default path)
-  if (
-    !configPath &&
-    (cwd.includes("nsyte-test-") || cwd.includes("/tmp/") || cwd.includes("/var/folders/"))
-  ) {
-    // Skip logging in test environments to avoid noise
-    if (!cwd.includes("nsyte-test-")) {
-      log.warn("Attempting to write config in temporary directory, skipping...");
-    }
+  // Prevent tests from ever writing to the real project config.
+  // Detect test environment via Deno.env or CWD heuristics.
+  const isTestEnv = typeof Deno.env.get("DENO_TESTING") === "string" ||
+    cwd.includes("nsyte-test-") || cwd.includes("/tmp/") || cwd.includes("/var/folders/");
+
+  if (isTestEnv && !configPath) {
     return;
+  }
+
+  // If a configPath is provided but resolves to the real project .nsite dir, block in tests
+  if (isTestEnv && configPath) {
+    const resolved = isAbsolute(configPath) ? configPath : resolve(cwd, configPath);
+    // Block if the resolved path is inside the actual nsyte project directory
+    if (!resolved.includes("nsyte-test-") && !resolved.startsWith("/tmp/") && !resolved.startsWith("/var/")) {
+      log.warn(`Blocked test from writing config to project path: ${resolved}`);
+      return;
+    }
   }
 
   const projectPath = resolveConfigPath(configPath);
