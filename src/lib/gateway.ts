@@ -156,11 +156,6 @@ export class NsiteGatewayServer {
     }
     console.log(colors.gray(`Press Ctrl+C to stop the server\n`));
 
-    // Open browser automatically unless disabled
-    if (!noOpen) {
-      await this.openBrowser(`http://localhost:${port}`);
-    }
-
     // Set up cleanup handlers
     const cleanup = () => {
       console.log(colors.yellow("\n🛑 Shutting down server..."));
@@ -175,6 +170,16 @@ export class NsiteGatewayServer {
 
     // Start server using Deno.serve
     this.serverController = Deno.serve({ port }, (req) => this.handleRequest(req));
+
+    // Open browser AFTER server is listening
+    if (!noOpen && targetNpub) {
+      const browserUrl = targetIdentifier
+        ? `http://${targetIdentifier}.${targetNpub}.localhost:${port}`
+        : `http://${targetNpub}.localhost:${port}`;
+      await this.openBrowser(browserUrl);
+    } else if (!noOpen) {
+      await this.openBrowser(`http://localhost:${port}`);
+    }
     await this.serverController.finished;
   }
 

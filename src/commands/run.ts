@@ -67,11 +67,11 @@ interface RunOptions extends ResolverOptions {
   config?: string;
   port?: number;
   cacheDir?: string;
-  noCache?: boolean;
+  cache?: boolean;
   useFallbackRelays?: boolean;
   useFallbackServers?: boolean;
   useFallbacks?: boolean;
-  noOpen?: boolean;
+  open?: boolean;
 }
 
 /**
@@ -92,7 +92,7 @@ export function registerRunCommand(): void {
       "Secret for signing (auto-detects format: nsec, nbunksec, bunker:// URL, or 64-char hex).",
     )
     .option(
-      "-c, --cache-dir <dir:string>",
+      "--cache-dir <dir:string>",
       "Directory to cache downloaded files (default: /tmp/nsyte)",
     )
     .option("--no-cache", "Disable file caching entirely")
@@ -149,7 +149,7 @@ export function registerRunCommand(): void {
       let cacheDir: string | null = null;
       // Cliffy should set noCache=true when --no-cache is passed, but also honor the raw flag just
       // in case it's stripped by a wrapper.
-      const disableCache = options.noCache === true ||
+      const disableCache = options.cache === false ||
         Deno.args.includes("--no-cache");
 
       if (disableCache) {
@@ -232,7 +232,7 @@ export function registerRunCommand(): void {
         cacheDir,
         allowFallbackRelays,
         allowFallbackServers,
-        noOpen: options.noOpen,
+        noOpen: options.open === false,
       });
 
       await server.start();
