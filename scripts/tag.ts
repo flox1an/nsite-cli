@@ -1,64 +1,38 @@
-import * as path from "std/path/mod.ts";
+import * as path from "@std/path";
 import { Confirm } from "@cliffy/prompt";
 
 async function updateVersion() {
   const rootDir = path.resolve(path.dirname(path.fromFileUrl(import.meta.url)), "..");
-  const versionFilePath = path.join(rootDir, "VERSION");
   const denoJsonPath = path.join(rootDir, "deno.json");
-  const srcVersionTsPath = path.join(rootDir, "src", "version.ts");
 
   let version: string;
   try {
-    version = (await Deno.readTextFile(versionFilePath)).trim();
-    if (!/^\d+\.\d+\.\d+([-.].+)?$/.test(version)) {
-      console.error(`Error: Version "${version}" in VERSION file is not a valid semantic version.`);
+    const denoJson = JSON.parse(await Deno.readTextFile(denoJsonPath));
+    version = denoJson.version;
+    if (!version || !/^\d+\.\d+\.\d+([-.].+)?$/.test(version)) {
+      console.error(`Error: Version "${version}" in deno.json is not a valid semantic version.`);
       return;
     }
   } catch (error) {
-    console.error("Error reading VERSION file:", error);
+    console.error("Error reading deno.json:", error);
     return;
   }
 
-  console.log(`Source version from VERSION file: ${version}`);
+  console.log(`Source version from deno.json: ${version}`);
   const gitTagVersion = `v${version}`;
 
   try {
-    const versionFileContent = `export const version = "${version}";\n`;
-    await Deno.writeTextFile(srcVersionTsPath, versionFileContent);
-    console.log(`Successfully updated src/version.ts to version ${version}`);
-  } catch (error) {
-    console.error("Error updating src/version.ts:", error);
-    return;
-  }
-
-  try {
-    const denoJsonContent = await Deno.readTextFile(denoJsonPath);
-    const denoJson = JSON.parse(denoJsonContent);
-
-    if (denoJson.version === version) {
-      console.log("deno.json version is already up to date.");
-    } else {
-      denoJson.version = version;
-      await Deno.writeTextFile(denoJsonPath, JSON.stringify(denoJson, null, 2) + "\n");
-      console.log(`Successfully updated deno.json to ${version}`);
-    }
-  } catch (error) {
-    console.error("Error updating deno.json:", error);
-    return;
-  }
-
-  try {
     const statusProcess = new Deno.Command("git", {
-      args: ["status", "--porcelain", "VERSION", "src/version.ts", "deno.json"],
+      args: ["status", "--porcelain", "deno.json"],
     });
     const { stdout: statusOutput } = await statusProcess.output();
     const status = new TextDecoder().decode(statusOutput).trim();
 
     let committedFiles = false;
     if (status) {
-      console.log(`Committing changes to VERSION, src/version.ts, and/or deno.json...`);
+      console.log(`Committing changes to deno.json...`);
       const addProcess = new Deno.Command("git", {
-        args: ["add", "VERSION", "src/version.ts", "deno.json"],
+        args: ["add", "deno.json"],
       });
       await addProcess.output();
 
@@ -76,24 +50,22 @@ async function updateVersion() {
           console.error("Error committing changes:", commitErrText);
           return;
         } else {
-          console.log("Nothing to commit. Monitored files are already in the desired state.");
+          console.log("Nothing to commit. deno.json is already in the desired state.");
         }
       } else if (commitOutText.includes("nothing to commit")) {
-        console.log("Nothing to commit. Monitored files are already in the desired state.");
+        console.log("Nothing to commit. deno.json is already in the desired state.");
       } else {
         console.log(`Successfully committed version update: ${version}`);
         committedFiles = true;
       }
     } else {
-      console.log("No changes in VERSION, src/version.ts, or deno.json to commit.");
+      console.log("No changes in deno.json to commit.");
     }
 
     const generalStatusProcess = new Deno.Command("git", { args: ["status", "--porcelain"] });
     const { stdout: generalStatusOutput } = await generalStatusProcess.output();
     const generalStatus = new TextDecoder().decode(generalStatusOutput).trim();
     const otherChanges = generalStatus.split("\n").filter((line) =>
-      !line.includes("VERSION") &&
-      !line.includes("src/version.ts") &&
       !line.includes("deno.json")
     ).map((line) => line.substring(3)).join(", ");
 

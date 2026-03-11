@@ -1,1 +1,2 @@
-export const version = "0.22.3";
+import denoConfig from "../deno.json" with { type: "json" };
+export const version: string = denoConfig.version;
