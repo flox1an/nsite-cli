@@ -3,17 +3,20 @@ import { Confirm } from "@cliffy/prompt";
 
 async function release() {
   const rootDir = path.resolve(path.dirname(path.fromFileUrl(import.meta.url)), "..");
-  const versionFilePath = path.join(rootDir, "VERSION");
+  const denoJsonPath = path.join(rootDir, "deno.json");
 
   let version: string;
   try {
-    version = (await Deno.readTextFile(versionFilePath)).trim();
-    if (!/^\d+\.\d+\.\d+([-.].+)?$/.test(version)) {
-      console.error(`Error: Version "${version}" in VERSION file is not a valid semantic version.`);
+    const denoJson = JSON.parse(await Deno.readTextFile(denoJsonPath));
+    version = denoJson.version;
+    if (!version || !/^\d+\.\d+\.\d+([-.].+)?$/.test(version)) {
+      console.error(
+        `Error: Version "${version}" in deno.json is not a valid semantic version.`,
+      );
       return;
     }
   } catch (error) {
-    console.error("Error reading VERSION file:", error);
+    console.error("Error reading deno.json:", error);
     return;
   }
 

@@ -22,4 +22,13 @@ Deno.test("version", async (t) => {
     const validChars = /^[0-9a-zA-Z.\-+]+$/;
     assertEquals(validChars.test(version), true);
   });
+
+  await t.step("should match deno.json version (single source of truth)", async () => {
+    const denoJson = JSON.parse(await Deno.readTextFile("deno.json"));
+    assertEquals(
+      version,
+      denoJson.version,
+      `version.ts exports "${version}" but deno.json has "${denoJson.version}" — these must match`,
+    );
+  });
 });

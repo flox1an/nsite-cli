@@ -28,6 +28,9 @@ jobs:
           echo "VERSION=${VERSION#v}" >> $GITHUB_ENV
           echo "TAG=$VERSION" >> $GITHUB_ENV
 
+      - name: Sync version in deno.json for build
+        run: deno run --allow-read --allow-write --allow-env scripts/sync-version.ts "${{ env.VERSION }}"
+
       - name: Build all binaries
         run: |
           mkdir -p dist
