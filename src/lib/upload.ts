@@ -163,6 +163,7 @@ export type UploadResponse = {
   eventId?: string;
   eventPublished?: boolean;
   skipped?: boolean;
+  retries?: number;
   serverResults: {
     [server: string]: {
       success: boolean;
@@ -625,6 +626,7 @@ async function uploadFile(
       file,
       success: true, // Success if blob was uploaded to at least one server
       skipped: allAlready,
+      retries: retryCount,
       serverResults,
       eventPublished: false, // Events are published separately via manifest
       error: undefined,
@@ -642,6 +644,7 @@ async function uploadFile(
         file,
         success: false,
         skipped: allAlready,
+        retries: retryCount,
         error: `Rate limited: ${errorMessage}`,
         serverResults,
         eventPublished: false,
@@ -669,6 +672,7 @@ async function uploadFile(
     return {
       file,
       success: false,
+      retries: retryCount,
       error: errorMessage,
       serverResults,
       eventPublished: false,

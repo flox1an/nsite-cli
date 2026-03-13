@@ -44,9 +44,11 @@ import {
   formatRelayList,
   formatRelayPublishResults,
   formatSectionHeader,
-  formatServerResults,
+  formatSuccessRatio,
+  formatTable,
   formatTitle,
 } from "../ui/formatters.ts";
+import { SERVER_COLORS, SERVER_SYMBOL } from "./list.ts";
 import { ProgressRenderer } from "../ui/progress.ts";
 import { StatusDisplay } from "../ui/status.ts";
 import { loadAsyncMap } from "applesauce-loaders/helpers";
@@ -379,6 +381,44 @@ export async function deployCommand(
  * - Everything succeeded
  * - No operations were needed
  */
+/**
+ * Format server results with retry counts
+ */
+function formatServerResultsWithRetries(
+  serverStats: Record<string, { success: number; total: number; retries: number }>,
+): string {
+  const displayManager = getDisplayManager();
+
+  if (Object.keys(serverStats).length === 0) {
+    return "No server results available";
+  }
+
+  if (displayManager.isNonInteractive()) {
+    return Object.entries(serverStats)
+      .map(([server, stats]) => {
+        const pct = Math.round((stats.success / stats.total) * 100);
+        const retryStr = stats.retries > 0 ? `, ${stats.retries} retries` : "";
+        return `${server}: ${stats.success}/${stats.total} (${pct}%)${retryStr}`;
+      })
+      .join(", ");
+  }
+
+  const rows: string[][] = [];
+
+  for (const [server, stats] of Object.entries(serverStats)) {
+    const ratio = formatSuccessRatio(stats.success, stats.total);
+    const status = stats.success === stats.total
+      ? colors.green("✓")
+      : (stats.success === 0 ? colors.red("✗") : colors.yellow("!"));
+    const retryInfo = stats.retries > 0
+      ? colors.yellow(` ${stats.retries} ${stats.retries === 1 ? "retry" : "retries"}`)
+      : "";
+    rows.push([status, server, ratio + retryInfo]);
+  }
+
+  return formatTable(rows);
+}
+
 function computeExitCode(result: DeployPhaseResult): number {
   // No operations needed — nothing to do is success
   if (result.filesRequiringUpload === 0 && result.manifestResult === null) {
@@ -1682,29 +1722,83 @@ async function uploadFiles(
           ),
         );
       }
-      messageCollector.printFileSuccessSummary();
+
+      // Build server color map and legend (like browse command)
+      const sortedServers = [...resolvedServers].sort();
+      const serverColorMap = new Map<string, (str: string) => string>();
+      const legendItems: string[] = [];
+      sortedServers.forEach((server, i) => {
+        const colorFn = SERVER_COLORS[i % SERVER_COLORS.length];
+        serverColorMap.set(server, colorFn);
+        const shortServer = server.replace(/^https?:\/\//, "");
+        legendItems.push(`${colorFn(SERVER_SYMBOL)} ${shortServer}`);
+      });
+      console.log(colors.gray(legendItems.join("  ")));
+      console.log("");
+
+      // Print each file with server indicators, type, and size
+      const successResponses = uploadResponses.filter((r) => r.success);
+      for (const result of successResponses) {
+        // Build server indicators
+        let indicators = "";
+        for (const server of sortedServers) {
+          const serverResult = result.serverResults[server];
+          if (serverResult?.success) {
+            const colorFn = serverColorMap.get(server) || colors.white;
+            indicators += colorFn(SERVER_SYMBOL);
+          } else {
+            indicators += colors.gray("·");
+          }
+        }
+
+        // File type from contentType (e.g. "text/html" -> "html", "image/png" -> "png")
+        const contentType = result.file.contentType || "unknown";
+        const fileType = contentType.includes("/")
+          ? contentType.split("/").pop() || contentType
+          : contentType;
+
+        const size = formatFileSize(result.file.size);
+        console.log(
+          `  ${indicators} ${result.file.path} ${colors.gray(fileType)} ${colors.gray(size)}`,
+        );
+      }
+
+      // Also show failed files
+      const failedResponses = uploadResponses.filter((r) => !r.success);
+      for (const result of failedResponses) {
+        const indicators = colors.red("·".repeat(sortedServers.length));
+        const contentType = result.file.contentType || "unknown";
+        const fileType = contentType.includes("/")
+          ? contentType.split("/").pop() || contentType
+          : contentType;
+        const size = formatFileSize(result.file.size);
+        console.log(
+          `  ${indicators} ${colors.red(result.file.path)} ${colors.gray(fileType)} ${colors.gray(size)} ${colors.red("✗ " + (result.error || "failed"))}`,
+        );
+      }
       console.log("");
     }
 
     console.log(formatSectionHeader("Blossom Server Summary"));
-    const serverResults: Record<string, { success: number; total: number }> = {};
+    const serverStats: Record<string, { success: number; total: number; retries: number }> = {};
     for (const server of resolvedServers) {
-      serverResults[server] = { success: 0, total: 0 };
+      serverStats[server] = { success: 0, total: 0, retries: 0 };
     }
     for (const result of uploadResponses) {
       if (result.success) {
         for (const [server, status] of Object.entries(result.serverResults)) {
-          if (!serverResults[server]) {
-            serverResults[server] = { success: 0, total: 0 };
+          if (!serverStats[server]) {
+            serverStats[server] = { success: 0, total: 0, retries: 0 };
           }
-          serverResults[server].total++;
+          serverStats[server].total++;
           if (status.success) {
-            serverResults[server].success++;
+            serverStats[server].success++;
           }
+          serverStats[server].retries += result.retries || 0;
         }
       }
     }
-    console.log(formatServerResults(serverResults));
+    console.log(formatServerResultsWithRetries(serverStats));
 
     const totalBlobs = uploadResponses.length;
     const successBlobs = uploadResponses.filter((r) => r.success).length;
