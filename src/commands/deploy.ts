@@ -1666,7 +1666,10 @@ async function uploadFiles(
   statusDisplay.update(`Uploading ${preparedFiles.length} files...`);
 
   setProgressMode(true);
-  const progressRenderer = new ProgressRenderer(preparedFiles.length);
+  const progressRenderer = new ProgressRenderer(
+    preparedFiles.length * resolvedServers.length,
+    resolvedServers,
+  );
   state.progressRenderer = progressRenderer;
   progressRenderer.start();
 

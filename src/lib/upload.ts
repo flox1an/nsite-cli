@@ -147,13 +147,29 @@ async function signEventWithRetry(
 /** @deprecated use Nip07Interface from applesauce-signers */
 export interface Signer extends ISigner {}
 
-export interface UploadProgress {
+export interface ServerProgressEntry {
   total: number;
   completed: number;
   failed: number;
-  inProgress: number;
-  skipped: number;
   retrying: number;
+  skipped: number;
+}
+
+export interface UploadProgress {
+  /** Total upload units: files × servers */
+  total: number;
+  /** Server-file pairs that succeeded (includes already-existing) */
+  completed: number;
+  /** Server-file pairs that failed after retries */
+  failed: number;
+  /** Files currently being processed */
+  inProgress: number;
+  /** Server-file pairs where file already existed */
+  skipped: number;
+  /** Server-file pairs currently retrying */
+  retrying: number;
+  /** Per-server progress breakdown */
+  serverProgress: Record<string, ServerProgressEntry>;
 }
 
 export type UploadResponse = {
@@ -375,17 +391,29 @@ export async function processUploads(
     `Starting upload of ${files.length} files to ${servers.length} servers with concurrency ${concurrency}`,
   );
 
+  const serverProgress: Record<string, ServerProgressEntry> = {};
+  for (const server of servers) {
+    serverProgress[server] = {
+      total: files.length,
+      completed: 0,
+      failed: 0,
+      retrying: 0,
+      skipped: 0,
+    };
+  }
+
   const progress: UploadProgress = {
-    total: files.length,
+    total: files.length * servers.length,
     completed: 0,
     failed: 0,
     inProgress: 0,
     skipped: 0,
     retrying: 0,
+    serverProgress,
   };
 
   if (progressCallback) {
-    progressCallback({ ...progress });
+    progressCallback({ ...progress, serverProgress: { ...serverProgress } });
   }
 
   // Pre-sign batch upload auth tokens (up to UPLOAD_AUTH_BATCH_SIZE hashes per token).
@@ -420,22 +448,53 @@ export async function processUploads(
 
   const errors: Array<{ file: string; error: string }> = [];
 
+  const emitProgress = () => {
+    if (progressCallback) {
+      progressCallback({ ...progress, serverProgress: { ...serverProgress } });
+    }
+  };
+
   while (queue.length > 0) {
     const chunk = queue.splice(0, Math.min(concurrency, queue.length));
     progress.inProgress = chunk.length;
 
-    if (progressCallback) {
-      progressCallback({ ...progress });
-    }
+    emitProgress();
 
     const chunkResults = await Promise.all(
       chunk.map(async (file) => {
-        return await uploadFile(file, servers, authTokenMap, (delta) => {
-          progress.retrying += delta;
-          if (progressCallback) {
-            progressCallback({ ...progress });
-          }
-        });
+        return await uploadFile(
+          file,
+          servers,
+          authTokenMap,
+          (server: string, event: string) => {
+            const sp = serverProgress[server];
+            switch (event) {
+              case "completed":
+                progress.completed++;
+                sp.completed++;
+                break;
+              case "skipped":
+                progress.completed++;
+                progress.skipped++;
+                sp.completed++;
+                sp.skipped++;
+                break;
+              case "failed":
+                progress.failed++;
+                sp.failed++;
+                break;
+              case "retry-start":
+                progress.retrying++;
+                sp.retrying++;
+                break;
+              case "retry-end":
+                progress.retrying--;
+                sp.retrying--;
+                break;
+            }
+            emitProgress();
+          },
+        );
       }),
     ).catch((error) => {
       log.error(`Error processing batch: ${error.message || error}`);
@@ -452,13 +511,7 @@ export async function processUploads(
     for (const result of chunkResults) {
       results.push(result);
 
-      if (result.success) {
-        progress.completed++;
-        if (result.skipped) {
-          progress.skipped++;
-        }
-      } else {
-        progress.failed++;
+      if (!result.success) {
         errors.push({
           file: result.file.path,
           error: result.error || "Unknown error",
@@ -466,10 +519,7 @@ export async function processUploads(
       }
 
       progress.inProgress = Math.max(0, progress.inProgress - 1);
-
-      if (progressCallback) {
-        progressCallback({ ...progress });
-      }
+      emitProgress();
     }
 
     if (queue.length > 0) {
@@ -488,15 +538,18 @@ export async function processUploads(
   return results;
 }
 
+type ServerEventType = "completed" | "failed" | "skipped" | "retry-start" | "retry-end";
+
 /**
  * Upload a single file to all servers with per-server retries.
  * Each server retries in parallel so a slow server doesn't block others.
+ * Fires onServerEvent for each server completion/failure/retry for real-time progress.
  */
 async function uploadFile(
   file: FileEntry,
   servers: string[],
   authTokenMap: Map<string, string>,
-  onRetry?: (delta: number) => void,
+  onServerEvent?: (server: string, event: ServerEventType) => void,
 ): Promise<UploadResponse> {
   const serverResults: {
     [server: string]: {
@@ -539,14 +592,17 @@ async function uploadFile(
           error: success ? undefined : outcome.error,
           retries: 0,
         };
-        if (success) return;
+        if (success) {
+          onServerEvent?.(server, outcome.alreadyExists ? "skipped" : "completed");
+          return;
+        }
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         serverResults[server] = { success: false, error: errorMessage, retries: 0 };
       }
 
       // Retries for this server (runs concurrently with other servers' retries)
-      onRetry?.(1);
+      onServerEvent?.(server, "retry-start");
       try {
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
@@ -560,14 +616,19 @@ async function uploadFile(
               error: success ? undefined : outcome.error,
               retries: attempt,
             };
-            if (success) break;
+            if (success) {
+              onServerEvent?.(server, "completed");
+              return;
+            }
           } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             serverResults[server] = { success: false, error: errorMessage, retries: attempt };
           }
         }
+        // All retries exhausted
+        onServerEvent?.(server, "failed");
       } finally {
-        onRetry?.(-1);
+        onServerEvent?.(server, "retry-end");
       }
     }),
   );
