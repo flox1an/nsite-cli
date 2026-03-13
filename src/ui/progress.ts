@@ -61,6 +61,7 @@ interface ServerProgress {
   failed: number;
   retrying: number;
   skipped: number;
+  finishedAt?: number;
 }
 
 interface ProgressData {
@@ -395,8 +396,15 @@ export class ProgressRenderer {
         if (sp.retrying > 0) statParts.push(colors.yellow(`${sp.retrying} retry`));
         if (sp.skipped > 0) statParts.push(colors.dim(`${sp.skipped} skip`));
 
+        // Show elapsed time when server is done
+        let timeStr = "";
+        if (sp.finishedAt) {
+          const secs = Math.floor((sp.finishedAt - this.startTime) / 1000);
+          timeStr = colors.dim(` (${secs}s)`);
+        }
+
         lines.push(
-          `  ${colorFn(symbol)} ${colorFn(name)} [${sBar}] ${pctStr} | ${statParts.join(", ")}`,
+          `  ${colorFn(symbol)} ${colorFn(name)} [${sBar}] ${pctStr} | ${statParts.join(", ")}${timeStr}`,
         );
       }
     }

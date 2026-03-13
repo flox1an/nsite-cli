@@ -153,6 +153,8 @@ export interface ServerProgressEntry {
   failed: number;
   retrying: number;
   skipped: number;
+  /** Timestamp (ms) when this server finished all files */
+  finishedAt?: number;
 }
 
 export interface UploadProgress {
@@ -491,6 +493,10 @@ export async function processUploads(
                 progress.retrying--;
                 sp.retrying--;
                 break;
+            }
+            // Record when a server finishes all its files
+            if (!sp.finishedAt && sp.completed + sp.failed >= sp.total) {
+              sp.finishedAt = Date.now();
             }
             emitProgress();
           },

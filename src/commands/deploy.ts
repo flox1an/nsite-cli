@@ -389,6 +389,7 @@ function formatServerSummary(
     string,
     { success: number; total: number; failed: number; retries: number; errors: Map<string, number> }
   >,
+  serverTimings?: Record<string, number | undefined>,
 ): string {
   const displayManager = getDisplayManager();
 
@@ -421,6 +422,10 @@ function formatServerSummary(
     }
     if (stats.retries > 0) {
       details.push(colors.yellow(`${stats.retries} retries`));
+    }
+    const elapsed = serverTimings?.[server];
+    if (elapsed != null) {
+      details.push(colors.dim(`${elapsed}s`));
     }
     const detailStr = details.length > 0 ? " " + details.join(", ") : "";
 
@@ -1677,6 +1682,8 @@ async function uploadFiles(
     throw new Error("No servers configured for upload");
   }
 
+  const uploadStartTime = Date.now();
+  let lastServerProgress: Record<string, { finishedAt?: number }> = {};
   const uploadResponses = await processUploads(
     preparedFiles,
     targetDir,
@@ -1686,6 +1693,7 @@ async function uploadFiles(
     options.concurrency,
     (progress) => {
       progressRenderer.update(progress);
+      lastServerProgress = progress.serverProgress;
     },
   );
 
@@ -1858,7 +1866,15 @@ async function uploadFiles(
         }
       }
     }
-    console.log(formatServerSummary(serverStats));
+    // Compute per-server elapsed seconds from upload start
+    const serverTimings: Record<string, number | undefined> = {};
+    for (const server of resolvedServers) {
+      const sp = lastServerProgress[server];
+      if (sp?.finishedAt) {
+        serverTimings[server] = Math.floor((sp.finishedAt - uploadStartTime) / 1000);
+      }
+    }
+    console.log(formatServerSummary(serverStats, serverTimings));
 
     const totalBlobs = uploadResponses.length;
     const successBlobs = uploadResponses.filter((r) => r.success).length;
