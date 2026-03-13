@@ -1,6 +1,6 @@
 import { colors } from "@cliffy/ansi/colors";
 import type { BrowseState } from "./state.ts";
-import { RELAY_SYMBOL, RELAY_SYMBOL_ALT, SERVER_SYMBOL } from "../../commands/list.ts";
+import { getServerSymbol, RELAY_SYMBOL, RELAY_SYMBOL_ALT } from "../../commands/list.ts";
 import { isIgnored } from "../../lib/files.ts";
 import { formatTimestamp } from "../time-formatter.ts";
 import { addLineNumbers, highlightJson } from "../json-highlighter.ts";
@@ -105,9 +105,9 @@ export function renderHeader(state: BrowseState) {
     const sortedServers = Array.from(state.serverColorMap.entries()).sort((a, b) =>
       a[0].localeCompare(b[0])
     );
-    sortedServers.forEach(([server, colorFn]) => {
+    sortedServers.forEach(([server, colorFn], serverIndex) => {
       const shortServer = server.replace(/^https?:\/\//, "").substring(0, 15);
-      legendItems.push(`${colorFn(SERVER_SYMBOL)} ${shortServer}`);
+      legendItems.push(`${colorFn(getServerSymbol(serverIndex))} ${shortServer}`);
     });
   }
 
@@ -382,10 +382,10 @@ export function renderFileList(state: BrowseState) {
 
         // Use sorted server order (same as legend) and check if file is available on each server
         const sortedServers = Array.from(state.serverColorMap.keys()).sort();
-        sortedServers.forEach((server) => {
+        sortedServers.forEach((server, serverIndex) => {
           if (item.file!.availableOnServers.includes(server)) {
             const colorFn = state.serverColorMap.get(server) || colors.white;
-            serverIndicators += colorFn(SERVER_SYMBOL);
+            serverIndicators += colorFn(getServerSymbol(serverIndex));
           }
         });
         serverIndicators += " ".repeat(
@@ -505,10 +505,10 @@ export function renderDetailView(state: BrowseState) {
     printLine(colors.bold("Available on Servers:"));
     // Use sorted server order (same as legend) and only show servers where file is available
     const sortedServers = Array.from(state.serverColorMap.keys()).sort();
-    sortedServers.forEach((server) => {
+    sortedServers.forEach((server, serverIndex) => {
       if (file.availableOnServers.includes(server)) {
         const colorFn = state.serverColorMap.get(server) || colors.white;
-        printLine(`  ${colorFn(SERVER_SYMBOL)} ${server}`);
+        printLine(`  ${colorFn(getServerSymbol(serverIndex))} ${server}`);
       }
     });
     printLine();

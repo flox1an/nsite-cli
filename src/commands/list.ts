@@ -31,16 +31,32 @@ export const RELAY_COLORS = [
 
 export const SERVER_COLORS = [
   colors.red,
+  colors.cyan,
+  colors.yellow,
+  colors.green,
+  colors.magenta,
   colors.brightRed,
-  colors.white,
-  colors.gray,
-  colors.brightWhite,
+  colors.brightCyan,
+  colors.brightYellow,
+  colors.brightGreen,
+  colors.brightMagenta,
 ];
 
 // Symbols for relays and servers
 export const RELAY_SYMBOL = "▲"; // Triangle for relays (right-side up)
 export const RELAY_SYMBOL_ALT = "▼"; // Triangle for relays (upside down)
-export const SERVER_SYMBOL = "■"; // Filled square for blossom servers
+
+// Distinct shapes for blossom servers — cycled per server
+export const SERVER_SYMBOLS = ["■", "●", "◆", "★", "▰"];
+/** @deprecated Use SERVER_SYMBOLS[index] instead */
+export const SERVER_SYMBOL = SERVER_SYMBOLS[0];
+
+/**
+ * Get the symbol for a server by index
+ */
+export function getServerSymbol(index: number): string {
+  return SERVER_SYMBOLS[index % SERVER_SYMBOLS.length];
+}
 
 /**
  * Truncate hash to show first 8 and last 8 characters
@@ -232,8 +248,10 @@ export function registerListCommand() {
 
         if (serverColorMap.size > 0) {
           console.log(colors.bold("\nBlossom Servers:"));
+          let serverIdx = 0;
           serverColorMap.forEach((colorFn, server) => {
-            console.log(`  ${colorFn(SERVER_SYMBOL)} ${server}`);
+            console.log(`  ${colorFn(getServerSymbol(serverIdx))} ${server}`);
+            serverIdx++;
           });
         }
 
@@ -365,7 +383,13 @@ export function registerListCommand() {
             let serverCount = 0;
             file.availableOnServers.forEach((server) => {
               const colorFn = serverColorMap.get(server) || colors.white;
-              serverIndicators += colorFn(SERVER_SYMBOL);
+              // Find server index for symbol selection
+              let srvIdx = 0;
+              for (const [mapServer] of serverColorMap) {
+                if (mapServer === server) break;
+                srvIdx++;
+              }
+              serverIndicators += colorFn(getServerSymbol(srvIdx));
               serverCount++;
             });
             // Pad based on actual symbol count

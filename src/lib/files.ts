@@ -76,13 +76,15 @@ export async function getLocalFiles(
       })
     ) {
       // --- Ignore Check Logic ---
-      // 1. Get path relative to CWD (where .nsyte-ignore is)
+      // 1. Get path relative to CWD (where .nsyte-ignore is) for rule matching
       const pathRelativeToCwd = relative(cwd, entry.path);
+      // Also get path relative to the deploy target dir for implicit dotfile detection
+      const pathRelativeToTarget = relative(normalizedDir, entry.path);
       const isDir = entry.isDirectory;
       // 2. Format path for matching (add trailing slash for dirs)
       const checkPath = isDir ? pathRelativeToCwd + "/" : pathRelativeToCwd;
       // 3. Perform the check
-      if (isIgnored(checkPath, parsedRules, isDir)) {
+      if (isIgnored(checkPath, parsedRules, isDir, pathRelativeToTarget)) {
         const ignoredPath = checkPath.replace(/\\/g, "/");
         ignoredFilePaths.push(ignoredPath);
         // Log which path (relative to CWD) caused the ignore
@@ -185,14 +187,30 @@ export function parseIgnorePatterns(patterns: string[]): IgnoreRule[] {
 }
 
 /**
+ * Check if any segment of a path starts with a dot (hidden file/dir).
+ * Ignores `.well-known` segments per convention.
+ */
+function hasHiddenSegment(filePath: string): boolean {
+  const segments = filePath.replace(/\/$/, "").split("/");
+  return segments.some((s) => s.startsWith(".") && s !== ".well-known");
+}
+
+/**
  * Checks if a given path should be ignored based on the rules.
  * Rules are processed in order. The last matching rule determines the outcome.
  * Negation rules (`!pattern`) override previous ignore rules.
+ *
+ * @param relativePath - Path relative to CWD for rule matching
+ * @param rules - Parsed ignore rules
+ * @param isDirectory - Whether the entry is a directory
+ * @param pathRelativeToTarget - Path relative to the deploy target dir, used for
+ *   implicit dotfile detection. Falls back to relativePath if not provided.
  */
 export function isIgnored(
   relativePath: string,
   rules: IgnoreRule[],
   isDirectory: boolean,
+  pathRelativeToTarget?: string,
 ): boolean {
   let lastMatchStatus: { ignored: boolean } | null = null;
 
@@ -228,7 +246,12 @@ export function isIgnored(
   }
 
   if (lastMatchStatus === null) {
-    if (checkPath.startsWith(".") && !checkPath.startsWith(".well-known/")) {
+    // Use path relative to the deploy target for implicit dotfile detection,
+    // so deploying from a dotdir (e.g. .sveltekit/output/) doesn't ignore everything.
+    const dotCheckPath = pathRelativeToTarget
+      ? pathRelativeToTarget.replace(/\\/g, "/")
+      : checkPath;
+    if (hasHiddenSegment(dotCheckPath)) {
       log.debug(
         `Implicitly ignoring dotfile/dir (no rule matched): ${checkPath}`,
       );

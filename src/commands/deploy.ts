@@ -48,7 +48,7 @@ import {
   formatTable,
   formatTitle,
 } from "../ui/formatters.ts";
-import { SERVER_COLORS, SERVER_SYMBOL } from "./list.ts";
+import { getServerSymbol, SERVER_COLORS } from "./list.ts";
 import { ProgressRenderer } from "../ui/progress.ts";
 import { StatusDisplay } from "../ui/status.ts";
 import { loadAsyncMap } from "applesauce-loaders/helpers";
@@ -382,10 +382,13 @@ export async function deployCommand(
  * - No operations were needed
  */
 /**
- * Format server results with retry counts
+ * Format server summary with failure counts, retries, and error breakdown
  */
-function formatServerResultsWithRetries(
-  serverStats: Record<string, { success: number; total: number; retries: number }>,
+function formatServerSummary(
+  serverStats: Record<
+    string,
+    { success: number; total: number; failed: number; retries: number; errors: Map<string, number> }
+  >,
 ): string {
   const displayManager = getDisplayManager();
 
@@ -396,27 +399,52 @@ function formatServerResultsWithRetries(
   if (displayManager.isNonInteractive()) {
     return Object.entries(serverStats)
       .map(([server, stats]) => {
-        const pct = Math.round((stats.success / stats.total) * 100);
+        const pct = stats.total === 0 ? 100 : Math.round((stats.success / stats.total) * 100);
+        const failStr = stats.failed > 0 ? `, ${stats.failed} failed` : "";
         const retryStr = stats.retries > 0 ? `, ${stats.retries} retries` : "";
-        return `${server}: ${stats.success}/${stats.total} (${pct}%)${retryStr}`;
+        return `${server}: ${stats.success}/${stats.total} (${pct}%)${failStr}${retryStr}`;
       })
       .join(", ");
   }
 
-  const rows: string[][] = [];
+  const lines: string[] = [];
 
   for (const [server, stats] of Object.entries(serverStats)) {
     const ratio = formatSuccessRatio(stats.success, stats.total);
     const status = stats.success === stats.total
       ? colors.green("✓")
       : (stats.success === 0 ? colors.red("✗") : colors.yellow("!"));
-    const retryInfo = stats.retries > 0
-      ? colors.yellow(` ${stats.retries} ${stats.retries === 1 ? "retry" : "retries"}`)
-      : "";
-    rows.push([status, server, ratio + retryInfo]);
+
+    const details: string[] = [];
+    if (stats.failed > 0) {
+      details.push(colors.red(`${stats.failed} failed`));
+    }
+    if (stats.retries > 0) {
+      details.push(colors.yellow(`${stats.retries} retries`));
+    }
+    const detailStr = details.length > 0 ? " " + details.join(", ") : "";
+
+    const row = formatTable([[status, server, ratio + detailStr]]);
+    lines.push(row);
+
+    // Show error breakdown only when there are multiple distinct error types
+    if (stats.errors.size > 1) {
+      const sortedErrors = [...stats.errors.entries()].sort((a, b) => b[1] - a[1]);
+      for (const [errMsg, count] of sortedErrors) {
+        const truncated = errMsg.length > 60 ? errMsg.substring(0, 57) + "..." : errMsg;
+        lines.push(`     ${colors.yellow(`${count}×`)} ${colors.gray(truncated)}`);
+      }
+    } else if (stats.errors.size === 1) {
+      // Single error type — show inline only if it's not a generic message
+      const [[errMsg]] = stats.errors;
+      if (errMsg !== "unknown error") {
+        const truncated = errMsg.length > 50 ? errMsg.substring(0, 47) + "..." : errMsg;
+        lines.push(`     ${colors.gray(truncated)}`);
+      }
+    }
   }
 
-  return formatTable(rows);
+  return lines.join("\n");
 }
 
 function computeExitCode(result: DeployPhaseResult): number {
@@ -1731,27 +1759,30 @@ async function uploadFiles(
         const colorFn = SERVER_COLORS[i % SERVER_COLORS.length];
         serverColorMap.set(server, colorFn);
         const shortServer = server.replace(/^https?:\/\//, "");
-        legendItems.push(`${colorFn(SERVER_SYMBOL)} ${shortServer}`);
+        legendItems.push(`${colorFn(getServerSymbol(i))} ${shortServer}`);
       });
-      console.log(colors.gray(legendItems.join("  ")));
+      console.log(legendItems.join("  "));
       console.log("");
 
-      // Print each file with server indicators, type, and size
-      const successResponses = uploadResponses.filter((r) => r.success);
-      for (const result of successResponses) {
-        // Build server indicators
+      // Separate uploaded, skipped, and failed responses
+      const uploadedResponses = uploadResponses.filter((r) => r.success && !r.skipped);
+      const skippedResponses = uploadResponses.filter((r) => r.success && r.skipped);
+      const failedResponses = uploadResponses.filter((r) => !r.success);
+
+      // Print uploaded files with server indicators, type, and size
+      for (const result of uploadedResponses) {
         let indicators = "";
-        for (const server of sortedServers) {
+        for (let si = 0; si < sortedServers.length; si++) {
+          const server = sortedServers[si];
           const serverResult = result.serverResults[server];
           if (serverResult?.success) {
             const colorFn = serverColorMap.get(server) || colors.white;
-            indicators += colorFn(SERVER_SYMBOL);
+            indicators += colorFn(getServerSymbol(si));
           } else {
             indicators += colors.gray("·");
           }
         }
 
-        // File type from contentType (e.g. "text/html" -> "html", "image/png" -> "png")
         const contentType = result.file.contentType || "unknown";
         const fileType = contentType.includes("/")
           ? contentType.split("/").pop() || contentType
@@ -1763,8 +1794,7 @@ async function uploadFiles(
         );
       }
 
-      // Also show failed files
-      const failedResponses = uploadResponses.filter((r) => !r.success);
+      // Show failed files
       for (const result of failedResponses) {
         const indicators = colors.red("·".repeat(sortedServers.length));
         const contentType = result.file.contentType || "unknown";
@@ -1777,28 +1807,55 @@ async function uploadFiles(
         );
       }
       console.log("");
+
+      // Show skipped files in a separate section
+      if (skippedResponses.length > 0) {
+        console.log(formatSectionHeader("Skipped Blobs (Already on Servers)"));
+        console.log(
+          colors.gray(`${skippedResponses.length} blob${skippedResponses.length === 1 ? "" : "s"} already present on all servers`),
+        );
+        for (const result of skippedResponses) {
+          const contentType = result.file.contentType || "unknown";
+          const fileType = contentType.includes("/")
+            ? contentType.split("/").pop() || contentType
+            : contentType;
+          const size = formatFileSize(result.file.size);
+          console.log(
+            `  ${colors.gray("⊘")} ${colors.gray(result.file.path)} ${colors.gray(fileType)} ${colors.gray(size)}`,
+          );
+        }
+        console.log("");
+      }
     }
 
     console.log(formatSectionHeader("Blossom Server Summary"));
-    const serverStats: Record<string, { success: number; total: number; retries: number }> = {};
+    const serverStats: Record<
+      string,
+      { success: number; total: number; failed: number; retries: number; errors: Map<string, number> }
+    > = {};
     for (const server of resolvedServers) {
-      serverStats[server] = { success: 0, total: 0, retries: 0 };
+      serverStats[server] = { success: 0, total: 0, failed: 0, retries: 0, errors: new Map() };
     }
     for (const result of uploadResponses) {
-      if (result.success) {
-        for (const [server, status] of Object.entries(result.serverResults)) {
-          if (!serverStats[server]) {
-            serverStats[server] = { success: 0, total: 0, retries: 0 };
-          }
-          serverStats[server].total++;
-          if (status.success) {
-            serverStats[server].success++;
-          }
-          serverStats[server].retries += result.retries || 0;
+      for (const [server, status] of Object.entries(result.serverResults)) {
+        if (!serverStats[server]) {
+          serverStats[server] = { success: 0, total: 0, failed: 0, retries: 0, errors: new Map() };
+        }
+        serverStats[server].total++;
+        serverStats[server].retries += status.retries || 0;
+        if (status.success) {
+          serverStats[server].success++;
+        } else {
+          serverStats[server].failed++;
+          const errMsg = status.error || "unknown error";
+          serverStats[server].errors.set(
+            errMsg,
+            (serverStats[server].errors.get(errMsg) || 0) + 1,
+          );
         }
       }
     }
-    console.log(formatServerResultsWithRetries(serverStats));
+    console.log(formatServerSummary(serverStats));
 
     const totalBlobs = uploadResponses.length;
     const successBlobs = uploadResponses.filter((r) => r.success).length;
