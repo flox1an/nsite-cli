@@ -348,6 +348,10 @@ export class ProgressRenderer {
 
     // Per-server bars when toggled on
     if (this.showServerBars && data.serverProgress) {
+      // Separator between main bar and server bars
+      const sepWidth = columns > 0 ? Math.min(columns, 60) : 60;
+      lines.push(colors.dim("─".repeat(sepWidth)));
+
       const maxNameLen = Math.max(
         ...this.servers.map((s) => shortServerName(s).length),
       );
@@ -365,7 +369,7 @@ export class ProgressRenderer {
           ? 0
           : Math.floor((serverDone / sp.total) * 100);
 
-        // Build per-server bar
+        // Build per-server bar with standard colors (green/yellow/red)
         let sGreen = 0;
         let sYellow = 0;
         let sRed = 0;
@@ -378,7 +382,7 @@ export class ProgressRenderer {
           sGray = Math.max(0, SERVER_BAR_WIDTH - sGreen - sYellow - sRed);
         }
 
-        const sBar = colorFn("█".repeat(sGreen))
+        const sBar = colors.green("█".repeat(sGreen))
           + colors.yellow("█".repeat(sYellow))
           + colors.red("█".repeat(sRed))
           + "░".repeat(sGray);
