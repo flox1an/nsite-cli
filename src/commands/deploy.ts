@@ -44,9 +44,11 @@ import {
   formatRelayList,
   formatRelayPublishResults,
   formatSectionHeader,
-  formatServerResults,
+  formatSuccessRatio,
+  formatTable,
   formatTitle,
 } from "../ui/formatters.ts";
+import { getServerSymbol, SERVER_COLORS } from "./list.ts";
 import { ProgressRenderer } from "../ui/progress.ts";
 import { StatusDisplay } from "../ui/status.ts";
 import { loadAsyncMap } from "applesauce-loaders/helpers";
@@ -63,7 +65,7 @@ export interface DeployCommandOptions {
   config?: string;
   force: boolean;
   verbose: boolean;
-  purge: boolean;
+  sync: boolean;
   useFallbackRelays?: boolean;
   useFallbackServers?: boolean;
   useFallbacks?: boolean;
@@ -150,14 +152,14 @@ export function registerDeployCommand(): void {
     .alias("dpl")
     .description("Deploy files from a directory")
     .arguments("<folder:string>")
-    .option("-f, --force", "Force publishing even if no changes were detected.", { default: false })
+    .option("-f, --force", "Force re-upload all files, bypassing server preflight checks.", { default: false })
     .option("-s, --servers <servers:string>", "The blossom servers to use (comma separated).")
     .option("-r, --relays <relays:string>", "The nostr relays to use (comma separated).")
     .option(
       "--sec <secret:string>",
       "Secret for signing (auto-detects format: nsec, nbunksec, bunker:// URL, or 64-char hex).",
     )
-    .option("-p, --purge", "After upload, delete remote file events not in current deployment.", {
+    .option("--sync", "Check all servers and upload missing blobs.", {
       default: false,
     })
     .option(
@@ -344,11 +346,6 @@ export async function deployCommand(
     );
     await maybePublishMetadata(state as DeploymentState, publisherPubkey);
 
-    // Handle smart purge AFTER upload
-    if (options.purge) {
-      await handleSmartPurgeOperation(state as DeploymentState, includedFiles, remoteFileEntries);
-    }
-
     if (includedFiles.length === 0 && toDelete.length === 0 && toTransfer.length === 0) {
       log.info("No effective operations performed.");
     }
@@ -379,6 +376,93 @@ export async function deployCommand(
  * - Everything succeeded
  * - No operations were needed
  */
+/**
+ * Format server summary with failure counts, retries, and error breakdown
+ */
+function formatServerSummary(
+  serverStats: Record<
+    string,
+    { success: number; total: number; failed: number; retries: number; errors: Map<string, number> }
+  >,
+  serverTimings?: Record<string, number | undefined>,
+): string {
+  const displayManager = getDisplayManager();
+
+  if (Object.keys(serverStats).length === 0) {
+    return "No server results available";
+  }
+
+  if (displayManager.isNonInteractive()) {
+    return Object.entries(serverStats)
+      .map(([server, stats]) => {
+        const pct = stats.total === 0 ? 100 : Math.round((stats.success / stats.total) * 100);
+        const failStr = stats.failed > 0 ? `, ${stats.failed} failed` : "";
+        const retryStr = stats.retries > 0 ? `, ${stats.retries} retries` : "";
+        return `${server}: ${stats.success}/${stats.total} (${pct}%)${failStr}${retryStr}`;
+      })
+      .join(", ");
+  }
+
+  const lines: string[] = [];
+  const tableRows: [string, string, string][] = [];
+  const errorLines: Map<number, string[]> = new Map();
+
+  const entries = Object.entries(serverStats);
+  for (let idx = 0; idx < entries.length; idx++) {
+    const [server, stats] = entries[idx];
+    const ratio = formatSuccessRatio(stats.success, stats.total);
+    const status = stats.success === stats.total
+      ? colors.green("✓")
+      : (stats.success === 0 ? colors.red("✗") : colors.yellow("!"));
+
+    const details: string[] = [];
+    if (stats.failed > 0) {
+      details.push(colors.red(`${stats.failed} failed`));
+    }
+    if (stats.retries > 0) {
+      details.push(colors.yellow(`${stats.retries} retries`));
+    }
+    const elapsed = serverTimings?.[server];
+    if (elapsed != null) {
+      details.push(colors.dim(`${elapsed}s`));
+    }
+    const detailStr = details.length > 0 ? " " + details.join(", ") : "";
+
+    tableRows.push([status, server, ratio + detailStr]);
+
+    // Collect error breakdown lines per row
+    const rowErrors: string[] = [];
+    if (stats.errors.size > 1) {
+      const sortedErrors = [...stats.errors.entries()].sort((a, b) => b[1] - a[1]);
+      for (const [errMsg, count] of sortedErrors) {
+        const truncated = errMsg.length > 60 ? errMsg.substring(0, 57) + "..." : errMsg;
+        rowErrors.push(`     ${colors.yellow(`${count}×`)} ${colors.gray(truncated)}`);
+      }
+    } else if (stats.errors.size === 1) {
+      const [[errMsg]] = stats.errors;
+      if (errMsg !== "unknown error") {
+        const truncated = errMsg.length > 50 ? errMsg.substring(0, 47) + "..." : errMsg;
+        rowErrors.push(`     ${colors.gray(truncated)}`);
+      }
+    }
+    if (rowErrors.length > 0) {
+      errorLines.set(idx, rowErrors);
+    }
+  }
+
+  // Format all rows together so column widths align
+  const formattedRows = formatTable(tableRows).split("\n");
+  for (let idx = 0; idx < formattedRows.length; idx++) {
+    lines.push(formattedRows[idx]);
+    const errs = errorLines.get(idx);
+    if (errs) {
+      lines.push(...errs);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function computeExitCode(result: DeployPhaseResult): number {
   // No operations needed — nothing to do is success
   if (result.filesRequiringUpload === 0 && result.manifestResult === null) {
@@ -867,7 +951,7 @@ function displayConfig(
       ),
     );
     console.log(formatConfigValue("Force Upload", options.force, options.force === false));
-    console.log(formatConfigValue("Purge Old Files", options.purge, options.purge === false));
+    console.log(formatConfigValue("Sync Servers", options.sync, options.sync === false));
     console.log(formatConfigValue("Concurrency", options.concurrency, options.concurrency === 4));
     console.log(
       formatConfigValue(
@@ -905,7 +989,7 @@ function displayConfig(
       ),
     );
     if (options.force) console.log(colors.yellow("Force Upload: true"));
-    if (options.purge) console.log(colors.yellow("Purge Old Files: true"));
+    if (options.sync) console.log(colors.yellow("Sync Servers: true"));
     if (options.fallback || config.fallback) {
       console.log(
         colors.cyan(
@@ -992,8 +1076,8 @@ async function scanLocalFiles(state: DeploymentState): Promise<FileEntry[]> {
     const noFilesMsg = "No files to upload after ignore rules.";
     if (displayManager.isInteractive()) statusDisplay.success(noFilesMsg);
     else console.log(colors.yellow(noFilesMsg));
-    if (options.purge || shouldPublishAny) {
-      log.info("Proceeding with purge/publish operations as requested despite no files to upload.");
+    if (shouldPublishAny) {
+      log.info("Proceeding with publish operations as requested despite no files to upload.");
     } else {
       return Deno.exit(0);
     }
@@ -1018,8 +1102,8 @@ async function fetchRemoteFiles(
   const { statusDisplay, displayManager, options, resolvedRelays } = state;
   let remoteFileEntries: FileEntry[] = [];
 
-  // We still need remote file info when purging, even if we're forcing uploads
-  const shouldFetchRemote = !options.force || options.purge;
+  // We need remote file info for sync mode, and when not forcing uploads
+  const shouldFetchRemote = !options.force || options.sync;
   const allowFallbackRelays = options.useFallbacks || options.useFallbackRelays || false;
 
   if (shouldFetchRemote) {
@@ -1029,7 +1113,7 @@ async function fetchRemoteFiles(
       : (allowFallbackRelays ? NSYTE_BROADCAST_RELAYS : []);
 
     if (primaryRelays.length > 0) {
-      const reason = options.force && options.purge ? " (required for purge)" : "";
+      const reason = options.force && options.sync ? " (required for sync)" : "";
       statusDisplay.update(`Checking for existing files on remote relays${reason}...`);
       try {
         remoteFileEntries = await listRemoteFiles(primaryRelays, publisherPubkey);
@@ -1073,65 +1157,9 @@ async function fetchRemoteFiles(
       else console.log(colors.yellow(noRelayWarn));
     }
   } else {
-    log.debug("Skipping remote file check because --force was provided without --purge");
+    log.debug("Skipping remote file check because --force was provided without --sync");
   }
   return remoteFileEntries;
-}
-
-/**
- * Handle smart purge operations - only purge files not in current deployment
- */
-async function handleSmartPurgeOperation(
-  state: DeploymentState,
-  localFiles: FileEntry[],
-  remoteEntries: FileEntry[],
-): Promise<void> {
-  const { statusDisplay, displayManager, options, resolvedRelays, signer } = state;
-
-  // Find remote files that are not in the current local deployment
-  const localFilePaths = new Set(localFiles.map((f) => f.path));
-  const filesToPurge = remoteEntries.filter((remote) => !localFilePaths.has(remote.path));
-
-  if (filesToPurge.length === 0) {
-    const noPurgeMsg = "No unused remote files to purge.";
-    if (displayManager.isInteractive()) statusDisplay.success(noPurgeMsg);
-    else console.log(colors.green(noPurgeMsg));
-    return;
-  }
-
-  const purgeList = filesToPurge.map((f) => f.path).join("\n  - ");
-  // If --purge flag is provided, skip confirmation. Otherwise, ask interactively.
-  let confirmPurge = true;
-  if (!options.purge && !options.nonInteractive) {
-    confirmPurge = await Confirm.prompt({
-      message: `Purge ${filesToPurge.length} unused remote files?\n  - ${purgeList}\n\nContinue?`,
-      default: false,
-    });
-  }
-
-  if (!confirmPurge) {
-    log.info("Purge cancelled.");
-    return;
-  }
-
-  if (resolvedRelays.length === 0) {
-    const noRelayErr = "Cannot purge remote files: No relays specified.";
-    displayManager.isInteractive()
-      ? statusDisplay.error(noRelayErr)
-      : console.error(colors.red(noRelayErr));
-    log.error(noRelayErr);
-    return;
-  }
-
-  statusDisplay.update(`Purging ${filesToPurge.length} unused remote files...`);
-  try {
-    await purgeRemoteFiles(resolvedRelays, filesToPurge, signer);
-    statusDisplay.success(`Purged ${filesToPurge.length} unused remote files.`);
-  } catch (e: unknown) {
-    const errMsg = `Error during purge operation: ${getErrorMessage(e)}`;
-    statusDisplay.error(errMsg);
-    log.error(errMsg);
-  }
 }
 
 /**
@@ -1177,29 +1205,48 @@ async function compareAndPrepareFiles(
     (config.publishAppHandler ?? false);
   const shouldPublishAny = shouldPublishAppHandler;
 
-  if (toTransfer.length === 0 && !options.force && !options.purge) {
+  // Handle --sync: move existing files to toTransfer so they get uploaded.
+  // HEAD preflight stays active, so servers that already have the blob will skip.
+  if (options.sync && existing.length > 0) {
+    log.info(`--sync enabled: checking ${existing.length} existing files across all servers.`);
+    toTransfer.push(...existing);
+    unchanged = [];
+  }
+
+  if (toTransfer.length === 0 && !options.force && !options.sync) {
     log.info("No new files to upload.");
 
     if (displayManager.isInteractive()) {
-      const forceUpload = await Confirm.prompt({
-        message: "No new files detected. Force upload anyway?",
-        default: false,
+      const action = await Select.prompt({
+        message: "No new files detected. What would you like to do?",
+        options: [
+          { name: "Sync to all servers (backfill missing blobs)", value: "sync" },
+          { name: "Force re-upload everything", value: "force" },
+          { name: "Cancel", value: "cancel" },
+        ],
       });
 
-      if (!forceUpload) {
+      if (action === "cancel") {
         log.info("Upload cancelled by user.");
 
         if (!shouldPublishAny) {
           await flushQueuedLogs();
           return Deno.exit(0);
         }
-      } else {
+      } else if (action === "sync") {
+        log.info("Syncing files to all servers as requested by user.");
+        statusDisplay.update("Syncing files to all servers...");
+        toTransfer.push(...existing);
+        unchanged = [];
+      } else if (action === "force") {
         log.info("Forcing upload as requested by user.");
         statusDisplay.update("Forcing upload of all files...");
+        options.force = true;
         toTransfer.push(...existing);
+        unchanged = [];
       }
     } else {
-      const errMsg = "No new files to upload. Use --force to upload anyway.";
+      const errMsg = "No new files to upload. Use --sync to backfill servers, --force to re-upload all.";
       console.error(colors.red(errMsg));
       log.error(errMsg);
 
@@ -1598,7 +1645,10 @@ async function uploadFiles(
   statusDisplay.update(`Uploading ${preparedFiles.length} files...`);
 
   setProgressMode(true);
-  const progressRenderer = new ProgressRenderer(preparedFiles.length);
+  const progressRenderer = new ProgressRenderer(
+    preparedFiles.length * resolvedServers.length,
+    resolvedServers,
+  );
   state.progressRenderer = progressRenderer;
   progressRenderer.start();
 
@@ -1606,6 +1656,8 @@ async function uploadFiles(
     throw new Error("No servers configured for upload");
   }
 
+  const uploadStartTime = Date.now();
+  let lastServerProgress: Record<string, { finishedAt?: number }> = {};
   const uploadResponses = await processUploads(
     preparedFiles,
     targetDir,
@@ -1615,7 +1667,9 @@ async function uploadFiles(
     options.concurrency,
     (progress) => {
       progressRenderer.update(progress);
+      lastServerProgress = progress.serverProgress;
     },
+    options.force,
   );
 
   progressRenderer.stop();
@@ -1682,37 +1736,142 @@ async function uploadFiles(
           ),
         );
       }
-      messageCollector.printFileSuccessSummary();
+
+      // Build server color map and legend (like browse command)
+      // Use resolvedServers order (not sorted) to match progress bar symbol/color assignment
+      const sortedServers = [...resolvedServers];
+      const serverColorMap = new Map<string, (str: string) => string>();
+      const legendItems: string[] = [];
+      sortedServers.forEach((server, i) => {
+        const colorFn = SERVER_COLORS[i % SERVER_COLORS.length];
+        serverColorMap.set(server, colorFn);
+        const shortServer = server.replace(/^https?:\/\//, "");
+        legendItems.push(`${colorFn(getServerSymbol(i))} ${shortServer}`);
+      });
+      console.log(legendItems.join("  "));
       console.log("");
+
+      // Separate uploaded, skipped, and failed responses
+      const uploadedResponses = uploadResponses.filter((r) => r.success && !r.skipped);
+      const skippedResponses = uploadResponses.filter((r) => r.success && r.skipped);
+      const failedResponses = uploadResponses.filter((r) => !r.success);
+
+      // Print uploaded files with server indicators, type, and size
+      for (const result of uploadedResponses) {
+        let indicators = "";
+        for (let si = 0; si < sortedServers.length; si++) {
+          const server = sortedServers[si];
+          const serverResult = result.serverResults[server];
+          if (serverResult?.success) {
+            const colorFn = serverColorMap.get(server) || colors.white;
+            indicators += colorFn(getServerSymbol(si));
+          } else {
+            indicators += colors.gray("·");
+          }
+        }
+
+        const contentType = result.file.contentType || "unknown";
+        const fileType = contentType.includes("/")
+          ? contentType.split("/").pop() || contentType
+          : contentType;
+
+        const size = formatFileSize(result.file.size);
+        console.log(
+          `  ${indicators} ${result.file.path} ${colors.gray(fileType)} ${colors.gray(size)}`,
+        );
+      }
+
+      // Show failed files
+      for (const result of failedResponses) {
+        const indicators = colors.red("·".repeat(sortedServers.length));
+        const contentType = result.file.contentType || "unknown";
+        const fileType = contentType.includes("/")
+          ? contentType.split("/").pop() || contentType
+          : contentType;
+        const size = formatFileSize(result.file.size);
+        console.log(
+          `  ${indicators} ${colors.red(result.file.path)} ${colors.gray(fileType)} ${colors.gray(size)} ${colors.red("✗ " + (result.error || "failed"))}`,
+        );
+      }
+      console.log("");
+
+      // Show skipped files in a separate section
+      if (skippedResponses.length > 0) {
+        console.log(formatSectionHeader("Skipped Blobs (Already on Servers)"));
+        console.log(
+          colors.gray(`${skippedResponses.length} blob${skippedResponses.length === 1 ? "" : "s"} already present on all servers`),
+        );
+        for (const result of skippedResponses) {
+          const contentType = result.file.contentType || "unknown";
+          const fileType = contentType.includes("/")
+            ? contentType.split("/").pop() || contentType
+            : contentType;
+          const size = formatFileSize(result.file.size);
+          console.log(
+            `  ${colors.gray("⊘")} ${colors.gray(result.file.path)} ${colors.gray(fileType)} ${colors.gray(size)}`,
+          );
+        }
+        console.log("");
+      }
     }
 
     console.log(formatSectionHeader("Blossom Server Summary"));
-    const serverResults: Record<string, { success: number; total: number }> = {};
+    const serverStats: Record<
+      string,
+      { success: number; total: number; failed: number; retries: number; errors: Map<string, number> }
+    > = {};
     for (const server of resolvedServers) {
-      serverResults[server] = { success: 0, total: 0 };
+      serverStats[server] = { success: 0, total: 0, failed: 0, retries: 0, errors: new Map() };
     }
     for (const result of uploadResponses) {
-      if (result.success) {
-        for (const [server, status] of Object.entries(result.serverResults)) {
-          if (!serverResults[server]) {
-            serverResults[server] = { success: 0, total: 0 };
-          }
-          serverResults[server].total++;
-          if (status.success) {
-            serverResults[server].success++;
-          }
+      for (const [server, status] of Object.entries(result.serverResults)) {
+        if (!serverStats[server]) {
+          serverStats[server] = { success: 0, total: 0, failed: 0, retries: 0, errors: new Map() };
+        }
+        serverStats[server].total++;
+        serverStats[server].retries += status.retries || 0;
+        if (status.success) {
+          serverStats[server].success++;
+        } else {
+          serverStats[server].failed++;
+          const errMsg = status.error || "unknown error";
+          serverStats[server].errors.set(
+            errMsg,
+            (serverStats[server].errors.get(errMsg) || 0) + 1,
+          );
         }
       }
     }
-    console.log(formatServerResults(serverResults));
+    // Compute per-server elapsed seconds from upload start
+    const serverTimings: Record<string, number | undefined> = {};
+    for (const server of resolvedServers) {
+      const sp = lastServerProgress[server];
+      if (sp?.finishedAt) {
+        serverTimings[server] = Math.floor((sp.finishedAt - uploadStartTime) / 1000);
+      }
+    }
+    console.log(formatServerSummary(serverStats, serverTimings));
 
     const totalBlobs = uploadResponses.length;
     const successBlobs = uploadResponses.filter((r) => r.success).length;
+    const skippedBlobs = uploadResponses.filter((r) => r.skipped).length;
+    const backfilledBlobs = successBlobs - skippedBlobs;
     const pct = totalBlobs === 0 ? 100 : Math.round((successBlobs / totalBlobs) * 100);
     const colorFn = pct === 100 ? colors.green : pct > 0 ? colors.yellow : colors.red;
     console.log(
       colorFn(`Overall: ${successBlobs}/${totalBlobs} blobs on at least one server (${pct}%)`),
     );
+
+    // Show sync/force specific summary
+    if (options.sync && !options.force) {
+      console.log(
+        colors.cyan(`Sync: ${skippedBlobs} already on all servers, ${backfilledBlobs} backfilled`),
+      );
+    } else if (options.force) {
+      console.log(
+        colors.cyan(`Force: ${totalBlobs} files re-uploaded to ${resolvedServers.length} servers`),
+      );
+    }
     console.log("");
 
     // Create and publish site manifest event after all files are uploaded

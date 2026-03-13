@@ -115,7 +115,7 @@ async function headWithRetry(
   );
 }
 
-async function getPublicKeyWithRetry(signer: Signer): Promise<string> {
+async function _getPublicKeyWithRetry(signer: Signer): Promise<string> {
   return await runWithRetry<string>(
     "getPublicKey",
     MAX_RETRIES,
@@ -147,13 +147,31 @@ async function signEventWithRetry(
 /** @deprecated use Nip07Interface from applesauce-signers */
 export interface Signer extends ISigner {}
 
-export interface UploadProgress {
+export interface ServerProgressEntry {
   total: number;
   completed: number;
   failed: number;
-  inProgress: number;
-  skipped: number;
   retrying: number;
+  skipped: number;
+  /** Timestamp (ms) when this server finished all files */
+  finishedAt?: number;
+}
+
+export interface UploadProgress {
+  /** Total upload units: files × servers */
+  total: number;
+  /** Server-file pairs that succeeded (includes already-existing) */
+  completed: number;
+  /** Server-file pairs that failed after retries */
+  failed: number;
+  /** Files currently being processed */
+  inProgress: number;
+  /** Server-file pairs where file already existed */
+  skipped: number;
+  /** Server-file pairs currently retrying */
+  retrying: number;
+  /** Per-server progress breakdown */
+  serverProgress: Record<string, ServerProgressEntry>;
 }
 
 export type UploadResponse = {
@@ -168,6 +186,7 @@ export type UploadResponse = {
       success: boolean;
       error?: string;
       alreadyExists?: boolean;
+      retries?: number;
     };
   };
 };
@@ -212,7 +231,8 @@ async function uploadToServer(
   server: string,
   file: FileEntry,
   authHeader: string,
-): Promise<{ success: boolean; alreadyExists: boolean; error?: string }> {
+  force = false,
+): Promise<{ success: boolean; alreadyExists: boolean; error?: string; httpStatus?: number }> {
   if (!file.data || !file.sha256) {
     throw new Error("File data or SHA-256 hash missing");
   }
@@ -223,16 +243,20 @@ async function uploadToServer(
     const contentType = file.contentType || "application/octet-stream";
     const serverUrl = server.endsWith("/") ? server : `${server}/`;
 
-    try {
-      const preflightLabel = `HEAD preflight ${file.path} on ${server}`;
-      log.debug(`Checking if ${file.path} (${blobSha256}) already exists on ${server}`);
-      const exists = await headWithRetry(`${serverUrl}${blobSha256}`, preflightLabel);
-      if (exists) {
-        log.debug(`File ${file.path} (${blobSha256}) already exists on ${server}`);
-        return { success: true, alreadyExists: true };
+    if (!force) {
+      try {
+        const preflightLabel = `HEAD preflight ${file.path} on ${server}`;
+        log.debug(`Checking if ${file.path} (${blobSha256}) already exists on ${server}`);
+        const exists = await headWithRetry(`${serverUrl}${blobSha256}`, preflightLabel);
+        if (exists) {
+          log.debug(`File ${file.path} (${blobSha256}) already exists on ${server}`);
+          return { success: true, alreadyExists: true };
+        }
+      } catch (e) {
+        log.debug(`Error checking if file exists on ${server}: ${e}`);
       }
-    } catch (e) {
-      log.debug(`Error checking if file exists on ${server}: ${e}`);
+    } else {
+      log.debug(`Force mode: skipping HEAD preflight for ${file.path} on ${server}`);
     }
 
     const fileObj = new File([file.data], fileName, {
@@ -245,35 +269,16 @@ async function uploadToServer(
     try {
       const uploadLabel = `PUT upload ${file.path} to ${server}`;
       log.debug(`Trying PUT to ${serverUrl}upload with auth header`);
-      const response = await runWithRetry<Response>(
-        uploadLabel,
-        MAX_RETRIES,
-        RETRY_BASE_DELAY_MS,
-        async () => {
-          const res = await fetchWithTimeout(
-            `${serverUrl}upload`,
-            {
-              method: "PUT",
-              headers: headers,
-              body: fileObj,
-            },
-            FETCH_TIMEOUT_MS,
-            uploadLabel,
-          );
-
-          if (res.ok) {
-            return res;
-          }
-
-          if (shouldRetryStatus(res.status)) {
-            const text = await res.text().catch(() => "");
-            throw new Error(
-              `HTTP ${res.status}${text ? `: ${text}` : ""}`,
-            );
-          }
-
-          return res;
+      // Single attempt — retries are handled by uploadFile() with progress visibility
+      const response = await fetchWithTimeout(
+        `${serverUrl}upload`,
+        {
+          method: "PUT",
+          headers: headers,
+          body: fileObj,
         },
+        FETCH_TIMEOUT_MS,
+        uploadLabel,
       );
 
       if (response.ok) {
@@ -321,15 +326,18 @@ async function uploadToServer(
         }
       }
 
-      const errorText = await response.text();
-      log.debug(`PUT to /upload with auth header failed: ${response.status} - ${errorText}`);
+      const errorText = await response.text().catch(() => "");
+      const httpError = `HTTP ${response.status}${errorText ? `: ${errorText}` : ""}`;
+      log.debug(`PUT to /upload with auth header failed: ${httpError}`);
+      return { success: false, alreadyExists: false, error: httpError, httpStatus: response.status };
     } catch (e) {
       log.debug(`PUT to /upload with auth header failed: ${e}`);
+      return { success: false, alreadyExists: false, error: String(e) };
     }
   } catch (e) {
     log.debug(`PUT to /upload with auth header failed: ${e}`);
+    return { success: false, alreadyExists: false, error: String(e) };
   }
-  return { success: false, alreadyExists: false, error: "Upload failed" };
 }
 
 /**
@@ -373,12 +381,13 @@ async function publishEventToRelays(
  */
 export async function processUploads(
   files: FileEntry[],
-  baseDir: string,
+  _baseDir: string,
   servers: string[],
   signer: Signer,
   relays: string[],
   concurrency = DEFAULT_CONCURRENCY,
   progressCallback?: (progress: UploadProgress) => void,
+  force = false,
 ): Promise<UploadResponse[]> {
   if (!relays || relays.length === 0) {
     throw new Error(
@@ -390,20 +399,30 @@ export async function processUploads(
     `Starting upload of ${files.length} files to ${servers.length} servers with concurrency ${concurrency}`,
   );
 
+  const serverProgress: Record<string, ServerProgressEntry> = {};
+  for (const server of servers) {
+    serverProgress[server] = {
+      total: files.length,
+      completed: 0,
+      failed: 0,
+      retrying: 0,
+      skipped: 0,
+    };
+  }
+
   const progress: UploadProgress = {
-    total: files.length,
+    total: files.length * servers.length,
     completed: 0,
     failed: 0,
     inProgress: 0,
     skipped: 0,
     retrying: 0,
+    serverProgress,
   };
 
   if (progressCallback) {
-    progressCallback({ ...progress });
+    progressCallback({ ...progress, serverProgress: { ...serverProgress } });
   }
-
-  const userPubkey = await getPublicKeyWithRetry(signer);
 
   // Pre-sign batch upload auth tokens (up to UPLOAD_AUTH_BATCH_SIZE hashes per token).
   // This avoids one signer call per file — instead we sign ceil(n/UPLOAD_AUTH_BATCH_SIZE) tokens.
@@ -437,49 +456,58 @@ export async function processUploads(
 
   const errors: Array<{ file: string; error: string }> = [];
 
+  const emitProgress = () => {
+    if (progressCallback) {
+      progressCallback({ ...progress, serverProgress: { ...serverProgress } });
+    }
+  };
+
   while (queue.length > 0) {
     const chunk = queue.splice(0, Math.min(concurrency, queue.length));
     progress.inProgress = chunk.length;
 
-    if (progressCallback) {
-      progressCallback({ ...progress });
-    }
+    emitProgress();
 
     const chunkResults = await Promise.all(
       chunk.map(async (file) => {
-        try {
-          return await uploadFile(file, baseDir, servers, authTokenMap, relays, userPubkey, 0, (delta) => {
-            progress.retrying += delta;
-            if (progressCallback) {
-              progressCallback({ ...progress });
+        return await uploadFile(
+          file,
+          servers,
+          authTokenMap,
+          force,
+          (server: string, event: string) => {
+            const sp = serverProgress[server];
+            switch (event) {
+              case "completed":
+                progress.completed++;
+                sp.completed++;
+                break;
+              case "skipped":
+                progress.completed++;
+                progress.skipped++;
+                sp.completed++;
+                sp.skipped++;
+                break;
+              case "failed":
+                progress.failed++;
+                sp.failed++;
+                break;
+              case "retry-start":
+                progress.retrying++;
+                sp.retrying++;
+                break;
+              case "retry-end":
+                progress.retrying--;
+                sp.retrying--;
+                break;
             }
-          });
-        } catch (error: unknown) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          if (errorMessage.includes("rate-limit") || errorMessage.includes("noting too much")) {
-            log.warn(`Rate limiting detected while uploading ${file.path}: ${errorMessage}`);
-
-            return {
-              file,
-              success: false,
-              error: `Relay rate limited: ${errorMessage}`,
-              eventPublished: false,
-              serverResults: {},
-              skipped: false,
-            };
-          }
-
-          log.error(`Failed to upload ${file.path}: ${errorMessage}`);
-          return {
-            file,
-            success: false,
-            error: errorMessage,
-            serverResults: {},
-            eventPublished: false,
-            skipped: false,
-          };
-        }
+            // Record when a server finishes all its files
+            if (!sp.finishedAt && sp.completed + sp.failed >= sp.total) {
+              sp.finishedAt = Date.now();
+            }
+            emitProgress();
+          },
+        );
       }),
     ).catch((error) => {
       log.error(`Error processing batch: ${error.message || error}`);
@@ -496,22 +524,7 @@ export async function processUploads(
     for (const result of chunkResults) {
       results.push(result);
 
-      if (result.success) {
-        progress.completed++;
-        if (result.skipped) {
-          progress.skipped++;
-        }
-
-        if (
-          result.error &&
-          (result.error.includes("rate-limit") || result.error.includes("noting too much"))
-        ) {
-          log.warn(
-            `Upload for ${result.file.path} succeeded but event publishing was rate-limited`,
-          );
-        }
-      } else {
-        progress.failed++;
+      if (!result.success) {
         errors.push({
           file: result.file.path,
           error: result.error || "Unknown error",
@@ -519,10 +532,7 @@ export async function processUploads(
       }
 
       progress.inProgress = Math.max(0, progress.inProgress - 1);
-
-      if (progressCallback) {
-        progressCallback({ ...progress });
-      }
+      emitProgress();
     }
 
     if (queue.length > 0) {
@@ -541,137 +551,125 @@ export async function processUploads(
   return results;
 }
 
+type ServerEventType = "completed" | "failed" | "skipped" | "retry-start" | "retry-end";
+
 /**
- * Upload a single file with retries
+ * Upload a single file to all servers with per-server retries.
+ * Each server retries in parallel so a slow server doesn't block others.
+ * Fires onServerEvent for each server completion/failure/retry for real-time progress.
  */
 async function uploadFile(
   file: FileEntry,
-  baseDir: string,
   servers: string[],
   authTokenMap: Map<string, string>,
-  relays: string[],
-  userPubkey: string,
-  retryCount = 0,
-  onRetry?: (delta: number) => void,
+  force = false,
+  onServerEvent?: (server: string, event: ServerEventType) => void,
 ): Promise<UploadResponse> {
-  // Ensure serverResults is visible in catch blocks
   const serverResults: {
     [server: string]: {
       success: boolean;
       error?: string;
       alreadyExists?: boolean;
+      retries?: number;
     };
   } = {};
-  let allAlready = false;
 
-  try {
-    log.debug(
-      `Uploading file ${file.path}${retryCount > 0 ? ` (retry ${retryCount})` : ""}`,
-    );
+  log.debug(`Uploading file ${file.path}`);
 
-    if (!file.data || !file.sha256) {
-      throw new Error("File data or SHA-256 hash missing");
-    }
-
-    const authHeader = authTokenMap.get(file.sha256);
-    if (!authHeader) {
-      throw new Error(`No auth token found for blob ${file.sha256.substring(0, 8)}...`);
-    }
-
-    const uploadResults = await Promise.all(
-      servers.map(async (server) => {
-        try {
-          const outcome = await uploadToServer(server, file, authHeader);
-
-          serverResults[server] = {
-            success: outcome.success || outcome.alreadyExists,
-            alreadyExists: outcome.alreadyExists,
-            error: outcome.error,
-          };
-
-          return outcome;
-        } catch (error: unknown) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          serverResults[server] = { success: false, error: errorMessage };
-          return { success: false, alreadyExists: false, error: errorMessage };
-        }
-      }),
-    );
-
-    const anyServerSuccess = uploadResults.some((result) => result.success || result.alreadyExists);
-
-    if (!anyServerSuccess) {
-      const serverErrors = Object.entries(serverResults)
-        .map(([server, result]) => `${server}: ${result.error || "Unknown error"}`)
-        .join("; ");
-
-      throw new Error(`Failed to upload to any server: ${serverErrors}`);
-    }
-
-    const serverHasBlob = Object.values(serverResults).some(
-      (r) => r.success || r.alreadyExists,
-    );
-
-    if (!serverHasBlob) {
-      throw new Error("No server stored the blob after upload attempts");
-    }
-
-    allAlready = uploadResults.every((r) => r.alreadyExists);
-
-    // Note: Event publishing is now handled separately after all files are uploaded
-    // This function only handles blob uploads to servers
-
+  if (!file.data || !file.sha256) {
     return {
-      file,
-      success: true, // Success if blob was uploaded to at least one server
-      skipped: allAlready,
-      serverResults,
-      eventPublished: false, // Events are published separately via manifest
-      error: undefined,
-    };
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    if (
-      errorMessage.includes("rate-limit") ||
-      errorMessage.includes("noting too much")
-    ) {
-      log.warn(`Rate limiting detected for ${file.path}: ${errorMessage}`);
-
-      return {
-        file,
-        success: false,
-        skipped: allAlready,
-        error: `Rate limited: ${errorMessage}`,
-        serverResults,
-        eventPublished: false,
-      };
-    }
-
-    log.error(`Failed to upload ${file.path}: ${errorMessage}`);
-
-    if (retryCount < MAX_RETRIES) {
-      log.debug(
-        `Retrying upload for ${file.path} (attempt ${retryCount + 1}/${MAX_RETRIES})`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-      onRetry?.(1);
-      try {
-        const result = await uploadFile(file, baseDir, servers, authTokenMap, relays, userPubkey, retryCount + 1, onRetry);
-        onRetry?.(-1);
-        return result;
-      } catch (e) {
-        onRetry?.(-1);
-        throw e;
-      }
-    }
-
-    return {
-      file,
-      success: false,
-      error: errorMessage,
-      serverResults,
-      eventPublished: false,
+      file, success: false, skipped: false,
+      error: "File data or SHA-256 hash missing",
+      serverResults, eventPublished: false,
     };
   }
+
+  const authHeader = authTokenMap.get(file.sha256);
+  if (!authHeader) {
+    return {
+      file, success: false, skipped: false,
+      error: `No auth token found for blob ${file.sha256.substring(0, 8)}...`,
+      serverResults, eventPublished: false,
+    };
+  }
+
+  // Upload to each server with independent per-server retries, all in parallel
+  await Promise.all(
+    servers.map(async (server) => {
+      // Initial attempt
+      let shouldRetry = true;
+      try {
+        const outcome = await uploadToServer(server, file, authHeader, force);
+        const success = outcome.success || outcome.alreadyExists;
+        serverResults[server] = {
+          success,
+          alreadyExists: outcome.alreadyExists,
+          error: success ? undefined : outcome.error,
+          retries: 0,
+        };
+        if (success) {
+          onServerEvent?.(server, outcome.alreadyExists ? "skipped" : "completed");
+          return;
+        }
+        // Don't retry non-retryable HTTP statuses (e.g. 400, 401, 403)
+        if (outcome.httpStatus && !shouldRetryStatus(outcome.httpStatus)) {
+          shouldRetry = false;
+        }
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        serverResults[server] = { success: false, error: errorMessage, retries: 0 };
+      }
+
+      if (!shouldRetry) {
+        onServerEvent?.(server, "failed");
+        return;
+      }
+
+      // Retries for this server (runs concurrently with other servers' retries)
+      onServerEvent?.(server, "retry-start");
+      try {
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+          log.debug(`Retrying ${file.path} on ${server} (attempt ${attempt}/${MAX_RETRIES})`);
+          try {
+            const outcome = await uploadToServer(server, file, authHeader, force);
+            const success = outcome.success || outcome.alreadyExists;
+            serverResults[server] = {
+              success,
+              alreadyExists: outcome.alreadyExists,
+              error: success ? undefined : outcome.error,
+              retries: attempt,
+            };
+            if (success) {
+              onServerEvent?.(server, outcome.alreadyExists ? "skipped" : "completed");
+              return;
+            }
+            // Stop retrying on non-retryable HTTP statuses
+            if (outcome.httpStatus && !shouldRetryStatus(outcome.httpStatus)) {
+              break;
+            }
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            serverResults[server] = { success: false, error: errorMessage, retries: attempt };
+          }
+        }
+        // All retries exhausted or non-retryable
+        onServerEvent?.(server, "failed");
+      } finally {
+        onServerEvent?.(server, "retry-end");
+      }
+    }),
+  );
+
+  const anySuccess = Object.values(serverResults).some((r) => r.success);
+  const allAlready = Object.values(serverResults).every((r) => r.alreadyExists);
+
+  return {
+    file,
+    success: anySuccess,
+    skipped: allAlready,
+    serverResults,
+    eventPublished: false,
+    error: anySuccess ? undefined : "Failed to upload to any server",
+  };
 }

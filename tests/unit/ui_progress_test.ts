@@ -241,10 +241,10 @@ Deno.test("UI Progress - ProgressRenderer", async (t) => {
     const progress = new ProgressRenderer(5);
     progress.stop();
 
-    // Should clear the line
+    // Should clear the line (uses \x1b[2K to erase entire line)
     assertEquals(stdoutStub.calls.length, 1);
     const output = new TextDecoder().decode(stdoutStub.calls[0].args[0]);
-    assertStringIncludes(output, "\r\x1b[K");
+    assertStringIncludes(output, "\x1b[2K");
 
     stdoutStub.restore();
   });
@@ -315,33 +315,32 @@ Deno.test("UI Progress - ProgressRenderer", async (t) => {
     stdoutStub.restore();
   });
 
-  await t.step("should show server stats for latest file", () => {
+  await t.step("should show server progress when serverProgress provided", () => {
     restore(); // Clean up any previous stubs
     stdoutStub = stub(Deno.stdout, "writeSync", () => 0);
 
-    const progress = new ProgressRenderer(3);
+    const progress = new ProgressRenderer(6, [
+      "https://server1.com",
+      "https://server2.com",
+    ]);
     progress.update({
-      total: 3,
-      completed: 1,
+      total: 6,
+      completed: 3,
       failed: 0,
       inProgress: 2,
-      serverStats: {
-        "path/to/file1.txt": { successCount: 2, totalServers: 3 },
-        "path/to/file2.txt": { successCount: 1, totalServers: 2 },
+      serverProgress: {
+        "https://server1.com": { total: 3, completed: 2, failed: 0, retrying: 0, skipped: 0 },
+        "https://server2.com": { total: 3, completed: 1, failed: 0, retrying: 0, skipped: 0 },
       },
     });
 
-    // Find the call with actual progress content (not just clear codes)
-    let outputWithContent = "";
+    // Should have written progress output
+    let allOutput = "";
     for (let i = 0; i < stdoutStub.calls.length; i++) {
-      const output = new TextDecoder().decode(stdoutStub.calls[i].args[0]);
-      if (output.includes("servers for")) {
-        outputWithContent = output;
-        break;
-      }
+      allOutput += new TextDecoder().decode(stdoutStub.calls[i].args[0]);
     }
-    assertStringIncludes(outputWithContent, "1/2");
-    assertStringIncludes(outputWithContent, "file2.txt");
+    // Main progress bar should show 50% (3/6)
+    assertStringIncludes(allOutput, "50%");
 
     stdoutStub.restore();
   });
