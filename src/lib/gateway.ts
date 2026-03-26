@@ -1,5 +1,6 @@
 import { colors } from "@cliffy/ansi/colors";
 import { decompress as brotliDecompress } from "@nick/brotli";
+import { hexToBytes } from "@noble/hashes/utils";
 import { ensureDir } from "@std/fs";
 import { contentType } from "@std/media-types";
 import { extname, join } from "@std/path";
@@ -24,6 +25,7 @@ import {
   NSITE_NAME_SITE_KIND,
   NSITE_ROOT_SITE_KIND,
 } from "./manifest.ts";
+import { decodePubkeyBase36, encodePubkeyBase36, validateDTag } from "./nip5a.ts";
 import {
   type FileEntry,
   getSiteManifestEvent,
@@ -76,33 +78,56 @@ export interface GatewayServerOptions {
 }
 
 /**
- * Extract npub and optional identifier from hostname
- * Root site: "npub123.localhost" -> { npub: "npub123" }
- * Named site: "blog.npub123.localhost" -> { npub: "npub123", identifier: "blog" }
+ * Extract pubkey and optional identifier from hostname
+ * Root site: "npub123.localhost" -> { pubkey, kind: 15128, identifier: "" }
+ * Named site (NIP-5A): "<pubkeyB36><dTag>.localhost" -> { pubkey, kind: 35128, identifier: dTag }
  */
-function extractNpubAndIdentifier(
+export function extractNpubAndIdentifier(
   hostname: string,
 ): AddressPointer | null {
   const parts = hostname.split(".");
   if (parts.length < 2) return null;
 
-  // Handle root site: npub123.localhost
-  if (parts[0].startsWith("npub")) {
-    const pubkey = normalizeToPubkey(parts[0]);
+  const label = parts[0];
+
+  // Handle root site: npub1xxx.localhost (unchanged)
+  if (label.startsWith("npub")) {
+    const pubkey = normalizeToPubkey(label);
     if (!pubkey) return null;
     return { pubkey, kind: NSITE_ROOT_SITE_KIND, identifier: "" };
   }
 
-  // Handle named site: blog.npub123.localhost
-  if (parts.length >= 3 && parts[0] && parts[1].startsWith("npub")) {
-    const identifier = parts[0];
-    const pubkey = normalizeToPubkey(parts[1]);
+  // Handle NIP-5A named site: <pubkeyB36><dTag>.localhost
+  // pubkeyB36 is exactly 50 lowercase base36 chars, dTag is 0-13 chars
+  if (label.length >= 50) {
+    const pubkeyB36 = label.slice(0, 50);
+    const dTag = label.slice(50);
 
-    if (!pubkey) return null;
+    // Validate dTag if present (0-13 chars, a-z0-9 and hyphens, no trailing hyphen)
+    if (dTag.length > 0) {
+      const validation = validateDTag(dTag);
+      if (!validation.valid) {
+        return null;
+      }
+    }
 
-    // Validate identifier (alphanumeric, hyphens, underscores)
-    if (/^[a-zA-Z0-9_-]+$/.test(identifier)) {
-      return { pubkey, kind: NSITE_NAME_SITE_KIND, identifier };
+    try {
+      const pubkeyBytes = decodePubkeyBase36(pubkeyB36);
+      // Convert Uint8Array to hex string
+      const pubkey = Array.from(pubkeyBytes)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+      if (pubkey.length !== 64) return null;
+
+      return {
+        pubkey,
+        kind: dTag.length > 0 ? NSITE_NAME_SITE_KIND : NSITE_ROOT_SITE_KIND,
+        identifier: dTag,
+      };
+    } catch {
+      // Invalid base36 encoding
+      return null;
     }
   }
 
@@ -110,7 +135,50 @@ function extractNpubAndIdentifier(
 }
 
 /**
- * Nsite Gateway Server - serves nsites via npub subdomains
+ * Find 404 fallback file from the file list, trying compressed variants first.
+ * Returns the matching file entry and compression info, or null if no 404.html exists.
+ */
+export function find404Fallback(
+  files: FileEntry[],
+  supportsBrotli: boolean,
+  supportsGzip: boolean,
+): { file: FileEntry; compressed: boolean; type: "br" | "gz" | null } | null {
+  // Try brotli-compressed 404.html first
+  if (supportsBrotli) {
+    const brFile = files.find((f) => {
+      const normalizedPath = f.path.startsWith("/") ? f.path.slice(1) : f.path;
+      return normalizedPath === "404.html.br";
+    });
+    if (brFile && brFile.sha256) {
+      return { file: brFile, compressed: true, type: "br" };
+    }
+  }
+
+  // Try gzip-compressed 404.html
+  if (supportsGzip) {
+    const gzFile = files.find((f) => {
+      const normalizedPath = f.path.startsWith("/") ? f.path.slice(1) : f.path;
+      return normalizedPath === "404.html.gz";
+    });
+    if (gzFile && gzFile.sha256) {
+      return { file: gzFile, compressed: true, type: "gz" };
+    }
+  }
+
+  // Try uncompressed 404.html
+  const plainFile = files.find((f) => {
+    const normalizedPath = f.path.startsWith("/") ? f.path.slice(1) : f.path;
+    return normalizedPath === "404.html";
+  });
+  if (plainFile && plainFile.sha256) {
+    return { file: plainFile, compressed: false, type: null };
+  }
+
+  return null;
+}
+
+/**
+ * Nsite Gateway Server - serves nsites via npub (root) and NIP-5A base36 (named) subdomains
  */
 export class NsiteGatewayServer {
   private options: GatewayServerOptions;
@@ -128,13 +196,6 @@ export class NsiteGatewayServer {
   private pathUpdateTimestamps: Map<string, number>;
   private backgroundUpdateChecks: Map<string, Promise<void>>;
   private serverController: Deno.HttpServer | null = null;
-
-  /**
-   * Generate cache key for site-specific caches (not profile)
-   */
-  private getSiteCacheKey(npub: string, identifier?: string): string {
-    return identifier ? `${npub}:${identifier}` : `${npub}:root`;
-  }
 
   constructor(options: GatewayServerOptions) {
     this.options = options;
@@ -162,14 +223,20 @@ export class NsiteGatewayServer {
     console.log(colors.gray(`\nAccess nsites via:`));
     console.log(colors.gray(`  Root site: http://{npub}.localhost:${port}/path/to/file`));
     console.log(
-      colors.gray(`  Named site: http://{identifier}.{npub}.localhost:${port}/path/to/file`),
+      colors.gray(`  Named site: http://{base36pubkey}{dtag}.localhost:${port}/path/to/file`),
     );
     console.log(colors.gray(`Example: http://npub1abc123.localhost:${port}/index.html`));
-    console.log(colors.gray(`Example: http://blog.npub1abc123.localhost:${port}/index.html`));
+    console.log(
+      colors.gray(
+        `Example: http://0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdblog.localhost:${port}/index.html`,
+      ),
+    );
     console.log(colors.gray(`\nNote: http://localhost:${port} redirects to:`));
     if (targetNpub) {
       if (targetIdentifier) {
-        console.log(colors.gray(`http://${targetIdentifier}.${targetNpub}.localhost:${port}\n`));
+        const pubkeyBytes = hexToBytes(targetSite!.pubkey);
+        const targetB36 = encodePubkeyBase36(pubkeyBytes);
+        console.log(colors.gray(`http://${targetB36}${targetIdentifier}.localhost:${port}\n`));
       } else {
         console.log(colors.gray(`http://${targetNpub}.localhost:${port}\n`));
       }
@@ -227,13 +294,11 @@ export class NsiteGatewayServer {
     const hostname = request.headers.get("host")?.split(":")[0] || "";
     const { port, targetSite } = this.options;
 
-    // Extract targetNpub and targetIdentifier from targetSite
-    const targetNpub = targetSite ? npubEncode(targetSite.pubkey) : null;
     const targetIdentifier = targetSite?.identifier;
 
     // Handle root localhost redirect
     if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0") {
-      if (!targetNpub) {
+      if (!targetSite) {
         const elapsed = Math.round(performance.now() - startTime);
         console.log(colors.red(`✗ No target site configured - ${elapsed}ms`));
         return new Response("No target site configured", {
@@ -241,9 +306,15 @@ export class NsiteGatewayServer {
           headers: { "Content-Type": "text/plain", ...securityHeaders() },
         });
       }
-      const redirectUrl = targetIdentifier
-        ? `http://${targetIdentifier}.${targetNpub}.localhost:${port}${url.pathname}${url.search}`
-        : `http://${targetNpub}.localhost:${port}${url.pathname}${url.search}`;
+      let redirectUrl: string;
+      if (targetIdentifier) {
+        const targetB36 = encodePubkeyBase36(hexToBytes(targetSite.pubkey));
+        redirectUrl =
+          `http://${targetB36}${targetIdentifier}.localhost:${port}${url.pathname}${url.search}`;
+      } else {
+        const targetNpub = npubEncode(targetSite.pubkey);
+        redirectUrl = `http://${targetNpub}.localhost:${port}${url.pathname}${url.search}`;
+      }
       const elapsed = Math.round(performance.now() - startTime);
       console.log(colors.cyan(`→ Redirecting to ${redirectUrl} - ${elapsed}ms`));
       return new Response(null, {
@@ -261,24 +332,14 @@ export class NsiteGatewayServer {
 
     if (!sitePointer) {
       const elapsed = Math.round(performance.now() - startTime);
-      console.log(colors.red(`✗ Invalid request (no npub) - ${elapsed}ms`));
+      console.log(colors.red(`✗ Invalid request (unrecognized hostname format) - ${elapsed}ms`));
       return new Response(
-        "Invalid request. Use npub subdomain (e.g., npub123.localhost or blog.npub123.localhost)",
+        "Invalid request. Use npub subdomain for root sites (e.g., npub1xxx.localhost) or NIP-5A format for named sites (e.g., {base36pubkey}{dtag}.localhost)",
         {
           status: 400,
           headers: { "Content-Type": "text/plain", ...securityHeaders() },
         },
       );
-    }
-
-    // Return error for invalid site pointer
-    if (!sitePointer) {
-      const elapsed = Math.round(performance.now() - startTime);
-      console.log(colors.red(`✗ Invalid site pointer: ${hostname} - ${elapsed}ms`));
-      return new Response(`Invalid site pointer: ${escapeHtml(hostname)}`, {
-        status: 400,
-        headers: { "Content-Type": "text/plain", ...securityHeaders() },
-      });
     }
 
     // Get readable address for console logging
@@ -1125,54 +1186,24 @@ export class NsiteGatewayServer {
 
       // If no files found yet, try 404.html
       if (filesToTry.length === 0) {
-        let found404 = false;
-
-        // Try to find /404.html as fallback per nsite specification
-        // Check for compressed versions first if supported
-        if (supportsBrotli) {
-          const notFoundBr = fileListEntry.files.find((f) => {
-            const normalizedPath = f.path.startsWith("/") ? f.path.slice(1) : f.path;
-            return normalizedPath === "404.html.br";
-          });
-
-          if (notFoundBr && notFoundBr.sha256) {
-            filesToTry.push({ file: notFoundBr, compressed: true, type: "br" });
-            found404 = true;
-            console.log(
-              colors.yellow(`  → File not found: ${requestedPath}, will try /404.html.br`),
-            );
-          }
-        }
-
-        if (supportsGzip) {
-          const notFoundGz = fileListEntry.files.find((f) => {
-            const normalizedPath = f.path.startsWith("/") ? f.path.slice(1) : f.path;
-            return normalizedPath === "404.html.gz";
-          });
-
-          if (notFoundGz && notFoundGz.sha256) {
-            filesToTry.push({ file: notFoundGz, compressed: true, type: "gz" });
-            found404 = true;
-            console.log(
-              colors.yellow(`  → File not found: ${requestedPath}, will try /404.html.gz`),
-            );
-          }
-        }
-
-        // Always try uncompressed 404.html
-        const notFoundFile = fileListEntry.files.find((f) => {
-          const normalizedPath = f.path.startsWith("/") ? f.path.slice(1) : f.path;
-          return normalizedPath === "404.html";
-        });
-
-        if (notFoundFile && notFoundFile.sha256) {
-          filesToTry.push({ file: notFoundFile, compressed: false, type: null });
-          found404 = true;
-          console.log(colors.yellow(`  → File not found: ${requestedPath}, will try /404.html`));
+        const fallback = find404Fallback(fileListEntry.files, supportsBrotli, supportsGzip);
+        if (fallback) {
+          filesToTry.push(fallback);
+          const fallbackPath = fallback.file.path.startsWith("/")
+            ? fallback.file.path
+            : `/${fallback.file.path}`;
+          const compressionInfo = fallback.compressed
+            ? ` (${fallback.type === "br" ? "brotli" : "gzip"})`
+            : "";
+          console.log(
+            colors.yellow(
+              `  → File not found: ${requestedPath}, will try ${fallbackPath}${compressionInfo}`,
+            ),
+          );
         }
 
         // If still no file found, return error response
-        if (!found404) {
+        if (filesToTry.length === 0) {
           const elapsed = Math.round(performance.now() - startTime);
           console.log(
             colors.red(
@@ -1516,6 +1547,7 @@ export class NsiteGatewayServer {
       }
 
       // Serve the file
+      // NIP-5A spec: MUST serve /404.html as fallback with 404 status code
       // For 404 pages, use the 404.html content type, otherwise use the target path (without .br/.gz)
       const is404 = (file.path.endsWith("404.html") || file.path.endsWith("404.html.br") ||
         file.path.endsWith("404.html.gz")) &&

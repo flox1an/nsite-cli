@@ -2,7 +2,7 @@ import { colors } from "@cliffy/ansi/colors";
 import { Confirm, Input, Select } from "@cliffy/prompt";
 import nsyte from "./root.ts";
 import { join } from "@std/path";
-import { getOutboxes, npubEncode, relaySet } from "applesauce-core/helpers";
+import { getOutboxes, naddrEncode, npubEncode, relaySet } from "applesauce-core/helpers";
 import { type ISigner, NostrConnectSigner } from "applesauce-signers";
 import { createSigner as createSignerFromFactory } from "../lib/auth/signer-factory.ts";
 import {
@@ -34,7 +34,10 @@ import {
 } from "../lib/nostr.ts";
 import { SecretsManager } from "../lib/secrets/mod.ts";
 import { processUploads, type UploadResponse } from "../lib/upload.ts";
-import { parseRelayInput, truncateString } from "../lib/utils.ts";
+import { detectSourceUrl, parseRelayInput, truncateString } from "../lib/utils.ts";
+import { encodePubkeyBase36, validateDTag } from "../lib/nip5a.ts";
+import { hexToBytes } from "@noble/hashes/utils";
+import { NSITE_NAME_SITE_KIND } from "../lib/manifest.ts";
 import {
   formatConfigValue,
   formatFilePath,
@@ -271,6 +274,20 @@ export async function deployCommand(
       statusDisplay.error("Critical error: Project data could not be resolved.");
       log.error("Critical error: Project data is null after context resolution.");
       return Deno.exit(1);
+    }
+
+    // Validate named site identifier against NIP-5A rules
+    const siteId = config.id === null || config.id === "" ? undefined : config.id;
+    if (siteId) {
+      const validation = validateDTag(siteId);
+      if (!validation.valid) {
+        const errorMsg = validation.suggestion
+          ? `${validation.error}\n\n  Suggestion: Use "${validation.suggestion}" instead.\n  Update .nsite/config.json: "id": "${validation.suggestion}"`
+          : validation.error || "Invalid site identifier";
+        statusDisplay.error(errorMsg);
+        log.error(`dTag validation failed: ${validation.error}`);
+        return Deno.exit(1);
+      }
     }
 
     const signerResult = await initSigner(authKeyHex, config, options, options.config);
@@ -513,6 +530,7 @@ function computeExitCode(result: DeployPhaseResult): number {
  */
 function displayGatewayUrl(config: ProjectConfig, publisherPubkey: string): void {
   const npub = npubEncode(publisherPubkey);
+  const pubkeyB36 = encodePubkeyBase36(hexToBytes(publisherPubkey));
   const { gatewayHostnames, id } = config;
   const siteId = id === null || id === "" ? undefined : id;
   const isNamedSite = !!siteId;
@@ -520,16 +538,23 @@ function displayGatewayUrl(config: ProjectConfig, publisherPubkey: string): void
   console.log(colors.green(`\nThe nsite is now available on any nsite gateway, for example:`));
   for (const gatewayHostname of gatewayHostnames || []) {
     if (isNamedSite) {
-      console.log(colors.blue.underline(`https://${siteId}.${npub}.${gatewayHostname}/`));
+      console.log(colors.blue.underline(`https://${pubkeyB36}${siteId}.${gatewayHostname}/`));
     } else {
       console.log(colors.blue.underline(`https://${npub}.${gatewayHostname}/`));
     }
   }
   console.log(colors.green(`\nYou can also run the command:`));
 
-  console.log(
-    colors.magenta.bold(isNamedSite ? `nsyte run ${siteId}.${npub}` : `nsyte run ${npub}`),
-  );
+  if (isNamedSite) {
+    const naddr = naddrEncode({
+      pubkey: publisherPubkey,
+      kind: NSITE_NAME_SITE_KIND,
+      identifier: siteId,
+    });
+    console.log(colors.magenta.bold(`nsyte run ${naddr}`));
+  } else {
+    console.log(colors.magenta.bold(`nsyte run ${npub}`));
+  }
 }
 
 /**
@@ -1490,11 +1515,15 @@ async function publishSiteManifest(
     const manifestServers = options.servers?.split(",").filter((s) => s.trim()) || config.servers ||
       [];
 
+    // Detect source URL (config > git remote auto-detect)
+    const sourceUrl = await detectSourceUrl(config.source);
+
     const metadata = {
       title: config.title,
       description: config.description,
       servers: manifestServers, // Use config values for metadata (recommendations)
       relays: manifestRelays, // Use config values for metadata (recommendations)
+      source: sourceUrl,
     };
 
     // Display manifest event information before creating
@@ -1503,6 +1532,9 @@ async function publishSiteManifest(
     console.log(colors.cyan(`  Files: ${fileMappings.length}`));
     console.log(colors.cyan(`  Relays: ${manifestRelays.length}`));
     console.log(colors.cyan(`  Servers: ${manifestServers.length}`));
+    if (sourceUrl) {
+      console.log(colors.cyan(`  Source: ${sourceUrl}`));
+    }
     console.log("");
 
     // Create manifest event
