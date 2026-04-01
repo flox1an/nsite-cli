@@ -1,5 +1,12 @@
 # nsite-cli
 
+> [!CAUTION]
+> ## This project is not actively maintained
+>
+> **[nsyte.run](https://nsyte.run/)** is an actively developed alternative with more features, bug fixes, and ongoing support.
+>
+> Please use **https://nsyte.run/** instead.
+
 This command line tool allows you to publish a static website on NOSTR in a anonymous and censorship resistant way.
 
 - The website file listings are published as events (`Kind 34128`) on NOSTR relays.
