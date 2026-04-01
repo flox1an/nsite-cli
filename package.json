@@ -1,6 +1,6 @@
 {
   "name": "nsite-cli",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "author": "florian",
   "description": "nsite CLI - publish your site to NOSTR and blossom servers",
   "main": "dist/cli.js",
